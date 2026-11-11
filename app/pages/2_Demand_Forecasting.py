@@ -12,7 +12,6 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.services.db_service import get_demand_plans, get_projects, get_roles, get_skills
-from src.services.forecast_service import get_demand_forecast, ForecastResult
 from app.components.kpi_cards import render_kpi_row, render_alert_banner
 import plotly.express as px
 import plotly.graph_objects as go

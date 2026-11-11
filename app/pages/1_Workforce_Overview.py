@@ -55,12 +55,15 @@ if employees is None:
 
 # ── KPI Row ───────────────────────────────────────────────────────────────────
 total_headcount = len(employees)
-active_employees = int(employees["employment_status"].eq("ACTIVE").sum()) if "employment_status" in employees.columns else total_headcount
+status_col = "status" if "status" in employees.columns else ("employment_status" if "employment_status" in employees.columns else None)
+active_employees = int(employees[status_col].eq("ACTIVE").sum()) if status_col else total_headcount
 
 avg_utilization = 0.0
 bench_available = 0
-if availability is not None and "availability_pct" in availability.columns:
-    avg_utilization = round(float(availability["availability_pct"].mean()), 1)
+avail_pct_col = "availability_percentage" if availability is not None and "availability_percentage" in availability.columns else ("availability_pct" if availability is not None and "availability_pct" in availability.columns else None)
+if availability is not None and avail_pct_col:
+    avg_utilization = round(float(100.0 - availability[avail_pct_col].mean()), 1)
+    avg_utilization = max(0.0, min(100.0, avg_utilization))
     bench_col = "availability_type" if "availability_type" in availability.columns else None
     if bench_col:
         bench_available = int(availability[availability[bench_col] == "AVAILABLE_BENCH"].shape[0])
@@ -134,8 +137,7 @@ st.subheader("🗂️ Active Workforce")
 filter_col1, filter_col2, filter_col3 = st.columns(3)
 
 dept_options = ["All"] + sorted(employees[dept_col].dropna().unique().tolist()) if dept_col else ["All"]
-role_col = "role_title" if "role_title" in employees.columns else ("role_id" if "role_id" in employees.columns else None)
-status_col = "employment_status" if "employment_status" in employees.columns else None
+role_col = "current_role_id" if "current_role_id" in employees.columns else ("role_title" if "role_title" in employees.columns else ("role_id" if "role_id" in employees.columns else None))
 
 with filter_col1:
     sel_dept = st.selectbox("Department", dept_options)
@@ -169,18 +171,20 @@ st.dataframe(filtered.iloc[start:end], use_container_width=True, height=460)
 st.divider()
 st.subheader("📊 Department Utilization Gauges")
 
-if availability is not None and dept_col and "availability_pct" in availability.columns:
+if availability is not None and dept_col and avail_pct_col:
     # Merge to get department
     emp_id_col = "employee_id" if "employee_id" in employees.columns else employees.columns[0]
     avl_id_col = "employee_id" if "employee_id" in availability.columns else availability.columns[0]
 
     if avl_id_col in availability.columns and emp_id_col in employees.columns:
         merged = availability.merge(employees[[emp_id_col, dept_col]], left_on=avl_id_col, right_on=emp_id_col, how="left")
+        # Calculate utilization as 100 - availability_percentage
+        merged["utilization_pct"] = (100.0 - merged[avail_pct_col]).clip(lower=0.0, upper=100.0)
         dept_util = (
-            merged.groupby(dept_col)["availability_pct"]
+            merged.groupby(dept_col)["utilization_pct"]
             .mean()
             .reset_index()
-            .rename(columns={"availability_pct": "capacity_pct"})
+            .rename(columns={"utilization_pct": "capacity_pct"})
         )
 
         # Show bar chart
