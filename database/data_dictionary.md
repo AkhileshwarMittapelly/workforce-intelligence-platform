@@ -32,6 +32,7 @@ The database follows Third Normal Form (3NF/BCNF) and implements enterprise work
 | `training` | `training_id` | `TRN-XXXXX` | `^TRN-[0-9]{5}$` | `TRN-00001` |
 | `gap_analysis` | `gap_analysis_id` | `GAP-XXXXX` | `^GAP-[0-9]{5}$` | `GAP-00001` |
 | `historical_event_log` | `event_id` | `EVT-XXXXXXXX` | `^EVT-[0-9]{8}$` | `EVT-00000001` |
+| `leave_event` | `leave_id` | `LEV-XXXXX` | `^LEV-[0-9]{5}$` | `LEV-00001` |
 
 ---
 
@@ -326,7 +327,120 @@ Immutable event audit log supporting event-sourcing and complete state reconstru
 
 ---
 
-## 5. SQL Analytical Views for Streamlit
+---
+
+### 4.12 Supporting Table: `leave_event`
+Independent tracking of employee planned, approved, and rejected leave events.
+Approved leave directly reduces confirmed employee capacity, whereas pending or rejected leave does not.
+
+| Column Name | Data Type | Nullable | Default | Keys / Constraints | Description |
+|---|---|---|---|---|---|
+| `leave_id` | `VARCHAR(16)` | No | None | **PK**, `REGEXP '^LEV-[0-9]{5}$'` | Deterministic leave identifier (`LEV-00001`). |
+| `employee_id` | `VARCHAR(20)` | No | None | **FK** ➔ `employee(employee_id)` (`RESTRICT`) | Requesting employee. |
+| `leave_type` | `ENUM` | No | `'ANNUAL'` | `'ANNUAL','SICK','PARENTAL','UNPAID','BEREAVEMENT'` | Category of leave. |
+| `start_date` | `DATE` | No | None | Index (`idx_lev_emp_dates`) | Start date of leave period. |
+| `end_date` | `DATE` | No | None | `CHECK (end_date >= start_date)` | End date of leave period. |
+| `leave_hours` | `DECIMAL(5,2)` | No | `8.00` | `CHECK (leave_hours >= 0.00)` | Dedicated leave hours. |
+| `approval_status` | `ENUM` | No | `'PENDING'` | `'PENDING','APPROVED','REJECTED','CANCELLED'` | Current authorization status. |
+| `approver_id` | `VARCHAR(20)` | Yes | `NULL` | **FK** ➔ `employee(employee_id)` (`SET NULL`) | Manager/HR approver ID. |
+| `reason` | `VARCHAR(255)` | Yes | `NULL` | None | Reason or operational notes. |
+| `created_at` | `TIMESTAMP` | No | `CURRENT_TIMESTAMP` | None | Timestamp of request. |
+| `updated_at` | `TIMESTAMP` | No | `CURRENT_TIMESTAMP ON UPDATE` | None | Timestamp of last status change. |
+
+---
+
+## 5. Entity Relationship (ER) Diagram & Cardinality Matrix
+
+```mermaid
+erDiagram
+    ROLE ||--o{ EMPLOYEE : "assigns (1:N)"
+    ROLE ||--o{ DEMAND_PLAN : "requires (1:N)"
+    ROLE ||--o{ GAP_ANALYSIS : "diagnoses (1:N)"
+    
+    EMPLOYEE ||--o{ EMPLOYEE_SKILL : "possesses (1:N)"
+    SKILL ||--o{ EMPLOYEE_SKILL : "rated_in (1:N)"
+    
+    PROJECT ||--o{ DEMAND_PLAN : "forecasts (1:N)"
+    SKILL ||--o{ DEMAND_PLAN : "specifies (1:N)"
+    
+    EMPLOYEE ||--o{ ALLOCATION : "allocated_to (1:N)"
+    PROJECT ||--o{ ALLOCATION : "staffed_by (1:N)"
+    DEMAND_PLAN ||--o{ ALLOCATION : "fulfills (1:N optional)"
+    
+    EMPLOYEE ||--o{ AVAILABILITY : "tracks (1:N)"
+    EMPLOYEE ||--o{ LEAVE_EVENT : "requests (1:N)"
+    
+    EMPLOYEE ||--o{ TRAINING : "undertakes (1:N)"
+    SKILL ||--o{ TRAINING : "develops (1:N)"
+    
+    DEMAND_PLAN ||--o{ GAP_ANALYSIS : "originates (1:N)"
+    PROJECT ||--o{ GAP_ANALYSIS : "associates (1:N optional)"
+    SKILL ||--o{ GAP_ANALYSIS : "targets (1:N)"
+```
+
+### Relationship Cardinality Matrix
+
+| Parent Entity | Child Entity | Cardinality | Join Keys | Description |
+|---|---|---|---|---|
+| `role` | `employee` | 1 : N | `role.role_id = employee.current_role_id` | Standard organizational job profile. |
+| `employee` | `employee_skill` | 1 : N | `employee.employee_id = employee_skill.employee_id` | Competency portfolio per employee. |
+| `skill` | `employee_skill` | 1 : N | `skill.skill_id = employee_skill.skill_id` | Bridge table implementing Employee N:M Skill. |
+| `project` | `demand_plan` | 1 : N | `project.project_id = demand_plan.project_id` | Multi-period forward labor requirements. |
+| `role` | `demand_plan` | 1 : N | `role.role_id = demand_plan.role_id` | Role requirement per demand entry. |
+| `skill` | `demand_plan` | 1 : N | `skill.skill_id = demand_plan.required_skill_id` | Benchmark skill requirement. |
+| `employee` | `allocation` | 1 : N | `employee.employee_id = allocation.employee_id` | Project staffing assignments. |
+| `project` | `allocation` | 1 : N | `project.project_id = allocation.project_id` | Bridge table implementing Employee N:M Project. |
+| `demand_plan` | `allocation` | 1 : N (opt) | `demand_plan.demand_id = allocation.demand_id` | Optional traceability to originating demand. |
+| `employee` | `availability` | 1 : N | `employee.employee_id = availability.employee_id` | Periodic capacity and bench tracking. |
+| `employee` | `leave_event` | 1 : N | `employee.employee_id = leave_event.employee_id` | Independent leave management. |
+| `employee` | `training` | 1 : N | `employee.employee_id = training.employee_id` | Skill development enrollments. |
+| `skill` | `training` | 1 : N | `skill.skill_id = training.skill_id` | Subject matter being trained. |
+| `demand_plan` | `gap_analysis` | 1 : N (opt) | `demand_plan.demand_id = gap_analysis.demand_id` | Traceable source demand for deficit. |
+| `skill` | `gap_analysis` | 1 : N | `skill.skill_id = gap_analysis.skill_id` | Competency deficit target. |
+
+---
+
+## 6. Business Logic, Governance & Governance Rules
+
+### 6.1 Proficiency Scale Standard
+- **1 = Beginner**: Theoretical knowledge, needs direct supervision.
+- **2 = Basic**: Can complete straightforward tasks with periodic guidance.
+- **3 = Proficient**: Independent practitioner, delivers production deliverables without supervision.
+- **4 = Advanced**: Subject matter specialist, solves complex problems and designs architectures.
+- **5 = Expert**: Enterprise authority, mentors senior practitioners, sets technology strategy.
+
+### 6.2 Skill Freshness & Expiry Thresholds
+- **Freshness Window**: 18 months (`548 days`) from `last_evaluated_date`.
+- **Status Classification**:
+  - `ACTIVE`: Verified within the last 18 months and `status = 'ACTIVE'`.
+  - `STALE`: `last_evaluated_date` > 18 months ago, requiring re-verification before qualifying for critical demand.
+  - `EXPIRED`: Explicitly marked `status = 'EXPIRED'`, excluded from qualified supply calculations.
+
+### 6.3 Capacity Reconciliation & Leave Integration
+$$\text{Contracted Capacity} = \text{base\_capacity\_hours} \times \text{fte}$$
+$$\text{Net Available Capacity} = \max(0, \text{Contracted Capacity} - \text{Approved Leave Hours} - \text{Allocated Hours})$$
+$$\text{Utilization \%} = \frac{\text{Allocated Hours}}{\text{Contracted Capacity} - \text{Approved Leave Hours}} \times 100$$
+- **Leave Constraint**: Only `approval_status = 'APPROVED'` leave reduces capacity. `PENDING` or `REJECTED` leave does not alter active capacity.
+
+### 6.4 Demand Forecasting & Qualified Supply Matching
+- An employee counts toward supply for demand $D$ if and only if:
+  1. `employee.status = 'ACTIVE'` (not on leave, onboarding, or terminated).
+  2. `employee_skill.skill_id = D.required_skill_id` and `employee_skill.status = 'ACTIVE'`.
+  3. `employee_skill.proficiency_level >= D.min_proficiency_level`.
+  4. `employee_skill.last_evaluated_date` $\le 18$ months old (not stale).
+  5. Net available capacity in the target period $> 0$.
+
+### 6.5 Recommendation Decision Engine Rules
+When $\text{Shortage FTE} > 0$:
+1. If $\text{Shortage} > 5$ and $\text{Proficiency Gap} > 2$: $\rightarrow$ **`HIRE_EXTERNAL`**
+2. Else if $\text{Shortage} > 2$ and internal bench qualified staff exist: $\rightarrow$ **`REASSIGN_BENCH`**
+3. Else if $1 \le \text{Shortage} \le 2$ and training lead time allows: $\rightarrow$ **`UPSKILL_INTERNAL`**
+4. Else if project priority is `CRITICAL`: $\rightarrow$ **`ENGAGE_CONTRACTOR`**
+5. Else: $\rightarrow$ **`CROSS_TRAIN`**
+
+---
+
+## 7. SQL Analytical Views for Streamlit
 
 To avoid prohibited cross-table MySQL generated columns, the following analytical views compute live cross-table values:
 

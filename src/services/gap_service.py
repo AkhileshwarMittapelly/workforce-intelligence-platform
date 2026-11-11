@@ -168,13 +168,16 @@ def _compute_gap_recommendations(
         gap_analyses_df.columns = [c.strip().lower() for c in gap_analyses_df.columns]
 
     # Date filtering on demand
-    for col in ("period_start", "period_end"):
-        if col in demand_df.columns:
-            demand_df[col] = pd.to_datetime(demand_df[col], errors="coerce")
-    if period_start and "period_start" in demand_df.columns:
-        demand_df = demand_df[demand_df["period_start"] >= pd.Timestamp(period_start)]
-    if period_end and "period_end" in demand_df.columns:
-        demand_df = demand_df[demand_df["period_end"] <= pd.Timestamp(period_end)]
+    start_c = "start_date" if "start_date" in demand_df.columns else ("period_start" if "period_start" in demand_df.columns else None)
+    end_c = "end_date" if "end_date" in demand_df.columns else ("period_end" if "period_end" in demand_df.columns else None)
+    if start_c:
+        demand_df["_start_dt"] = pd.to_datetime(demand_df[start_c], errors="coerce")
+    if end_c:
+        demand_df["_end_dt"] = pd.to_datetime(demand_df[end_c], errors="coerce")
+    if period_start and "_start_dt" in demand_df.columns:
+        demand_df = demand_df[demand_df["_start_dt"] >= pd.Timestamp(period_start)]
+    if period_end and "_end_dt" in demand_df.columns:
+        demand_df = demand_df[demand_df["_end_dt"] <= pd.Timestamp(period_end)]
 
     if demand_df.empty:
         return []
@@ -187,7 +190,6 @@ def _compute_gap_recommendations(
 
     # --- Skill lookup ---
     skill_col_emp = "skill_id" if "skill_id" in employee_skills_df.columns else None
-    prof_col = "proficiency_level" if "proficiency_level" in employee_skills_df.columns else None
 
     if skill_col_emp and not employee_skills_df.empty:
         skill_lookup = employee_skills_df[
@@ -200,13 +202,19 @@ def _compute_gap_recommendations(
 
     # --- Bench employees: low allocation ---
     if not allocations_df.empty:
-        alloc_col = next((c for c in ("allocated_fte", "allocation_pct", "fte") if c in allocations_df.columns), None)
+        alloc_col = next((c for c in ("allocation_percentage", "allocated_fte", "allocation_pct", "fte") if c in allocations_df.columns), None)
         if alloc_col and "employee_id" in allocations_df.columns:
+            alloc_temp = allocations_df.copy()
+            if alloc_col == "allocation_percentage":
+                alloc_temp["_alloc_rate"] = alloc_temp[alloc_col].astype(float) / 100.0
+            else:
+                alloc_temp["_alloc_rate"] = alloc_temp[alloc_col].astype(float)
+
             emp_alloc_sum = (
-                allocations_df.groupby("employee_id")[alloc_col]
+                alloc_temp.groupby("employee_id")["_alloc_rate"]
                 .sum()
                 .reset_index()
-                .rename(columns={alloc_col: "total_alloc"})
+                .rename(columns={"_alloc_rate": "total_alloc"})
             )
             bench_emp_ids = set(
                 emp_alloc_sum[emp_alloc_sum["total_alloc"] < 0.5]["employee_id"].tolist()
@@ -232,7 +240,9 @@ def _compute_gap_recommendations(
     role_col = "role_id" if "role_id" in demand_df.columns else None
     proj_col = next((c for c in ("project_id", "proj_id") if c in demand_df.columns), None)
     fte_col = next((c for c in ("required_fte", "demand_fte", "fte") if c in demand_df.columns), None)
-    req_prof_col = "required_proficiency" if "required_proficiency" in demand_df.columns else None
+    req_prof_col = next(
+        (c for c in ("min_proficiency_level", "required_proficiency", "proficiency_level") if c in demand_df.columns), None
+    )
 
     if skill_demand_col is None or fte_col is None:
         logger.warning("demand_df missing required_skill_id/fte columns; cannot compute gaps.")
@@ -243,8 +253,8 @@ def _compute_gap_recommendations(
     demand_grp = demand_df.groupby(group_keys).agg(
         demand_fte=(fte_col, "sum"),
         req_prof=(req_prof_col, "max") if req_prof_col else (fte_col, "count"),
-        period_start=("period_start", "min") if "period_start" in demand_df.columns else (fte_col, "count"),
-        period_end=("period_end", "max") if "period_end" in demand_df.columns else (fte_col, "count"),
+        period_start=("_start_dt", "min") if "_start_dt" in demand_df.columns else (fte_col, "count"),
+        period_end=("_end_dt", "max") if "_end_dt" in demand_df.columns else (fte_col, "count"),
     ).reset_index()
 
     recommendations: list[GapRecommendation] = []

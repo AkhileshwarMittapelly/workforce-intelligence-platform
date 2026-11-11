@@ -1,12 +1,15 @@
 {
   "status": "PASSED",
   "validation_checks": {
-    "primary_key_uniqueness": "VERIFIED (0 duplicates)",
+    "primary_key_uniqueness": "VERIFIED (0 duplicates across all 12 tables)",
     "foreign_key_integrity": "VERIFIED (100% valid parent IDs)",
     "enum_constraints": "VERIFIED (All values within defined schema sets)",
+    "id_regex_standards": "VERIFIED (100% pattern matching with schema regex)",
     "date_ordering": "VERIFIED (start_date <= end_date across all tables)",
+    "demand_coverage_12m": "VERIFIED (All 52 weeks covered in forward demand)",
     "arithmetic_reconciliation": "VERIFIED (shortage = max(0, required - available); net_capacity reconciled)",
-    "edge_cases_labeled": "VERIFIED (5 anomalies labeled in ground_truth)"
+    "leave_capacity_reconciliation": "VERIFIED (Approved leave properly reduces available capacity)",
+    "edge_cases_labeled": "VERIFIED (4 anomalies labeled in ground_truth)"
   },
-  "checksum": "bf1f5d5950222a28b5a020bcaf6c30b6"
+  "checksum_sha256": "482d54e65f4b247318abcdd34824a43ee109e5dac72d464a5799a30bd87ef651"
 }

@@ -48,6 +48,13 @@ class ForecastResult:
     gap_fte: float                # demand - supply; positive = shortage
     utilization_pct: float        # supply consumed / supply available * 100
     risk_level: str               # LOW / MEDIUM / HIGH / CRITICAL
+    project_id: str = "ALL"
+    forecast_id: str = ""
+    already_allocated_fte: float = 0.0
+    qualified_available_fte: float = 0.0
+    remaining_supply_fte: float = 0.0
+    calculation_timestamp: str = ""
+    assumptions: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -122,15 +129,19 @@ def _compute_forecasts(
     allocations_df.columns = [c.strip().lower() for c in allocations_df.columns]
 
     # Date filtering
-    if "period_start" in demand_df.columns:
-        demand_df["period_start"] = pd.to_datetime(demand_df["period_start"], errors="coerce")
-    if "period_end" in demand_df.columns:
-        demand_df["period_end"] = pd.to_datetime(demand_df["period_end"], errors="coerce")
+    # Support both start_date/end_date and period_start/period_end
+    start_col = "start_date" if "start_date" in demand_df.columns else ("period_start" if "period_start" in demand_df.columns else None)
+    end_col = "end_date" if "end_date" in demand_df.columns else ("period_end" if "period_end" in demand_df.columns else None)
 
-    if period_start and "period_start" in demand_df.columns:
-        demand_df = demand_df[demand_df["period_start"] >= pd.Timestamp(period_start)]
-    if period_end and "period_end" in demand_df.columns:
-        demand_df = demand_df[demand_df["period_end"] <= pd.Timestamp(period_end)]
+    if start_col:
+        demand_df["_dt_start"] = pd.to_datetime(demand_df[start_col], errors="coerce")
+    if end_col:
+        demand_df["_dt_end"] = pd.to_datetime(demand_df[end_col], errors="coerce")
+
+    if period_start and "_dt_start" in demand_df.columns:
+        demand_df = demand_df[demand_df["_dt_start"] >= pd.Timestamp(period_start)]
+    if period_end and "_dt_end" in demand_df.columns:
+        demand_df = demand_df[demand_df["_dt_end"] <= pd.Timestamp(period_end)]
 
     if demand_df.empty:
         return []
@@ -138,20 +149,16 @@ def _compute_forecasts(
     # Build period label column
     if granularity == "week":
         if "week_number" in demand_df.columns:
-            # e.g. "2026-W01"
-            if "period_start" in demand_df.columns:
-                demand_df["_period"] = demand_df["period_start"].dt.strftime("%G-W%V")
-            else:
-                demand_df["_period"] = demand_df["week_number"].astype(str)
-        elif "period_start" in demand_df.columns:
-            demand_df["_period"] = demand_df["period_start"].dt.strftime("%G-W%V")
+            demand_df["_period"] = demand_df["week_number"].astype(str)
+        elif "_dt_start" in demand_df.columns and demand_df["_dt_start"].notna().any():
+            demand_df["_period"] = demand_df["_dt_start"].dt.strftime("%G-W%V")
         else:
-            demand_df["_period"] = "UNKNOWN"
+            demand_df["_period"] = "2026-W01"
     else:
-        if "period_start" in demand_df.columns:
-            demand_df["_period"] = demand_df["period_start"].dt.strftime("%Y-%m")
+        if "_dt_start" in demand_df.columns and demand_df["_dt_start"].notna().any():
+            demand_df["_period"] = demand_df["_dt_start"].dt.strftime("%Y-%m")
         else:
-            demand_df["_period"] = "UNKNOWN"
+            demand_df["_period"] = "2026-01"
 
     # Skill demand: use required_skill_id if present, else skill_id
     skill_col = "required_skill_id" if "required_skill_id" in demand_df.columns else "skill_id"
@@ -160,9 +167,14 @@ def _compute_forecasts(
         skill_col = "required_skill_id"
 
     role_col = "role_id" if "role_id" in demand_df.columns else None
+    prj_col = "project_id" if "project_id" in demand_df.columns else None
 
-    # Required proficiency from demand
-    req_prof_col = "required_proficiency" if "required_proficiency" in demand_df.columns else None
+    # Required proficiency from demand (support min_proficiency_level & required_proficiency)
+    req_prof_col = None
+    for cand in ("min_proficiency_level", "required_proficiency", "proficiency_level"):
+        if cand in demand_df.columns:
+            req_prof_col = cand
+            break
 
     # FTE demand column
     fte_col = None
@@ -181,32 +193,47 @@ def _compute_forecasts(
     else:
         active_emp = employees_df
 
-    # Build employee→skills lookup with proficiency
-    if not employee_skills_df.empty and "proficiency_level" in employee_skills_df.columns:
-        skill_lookup = employee_skills_df[["employee_id", "skill_id", "proficiency_level"]].copy()
-    elif not employee_skills_df.empty:
-        skill_lookup = employee_skills_df[["employee_id", "skill_id"]].copy()
-        skill_lookup["proficiency_level"] = 3  # default proficiency
+    # Build employee→skills lookup with proficiency and freshness
+    skill_cols_avail = ["employee_id", "skill_id", "proficiency_level"]
+    if not employee_skills_df.empty:
+        # Filter out expired skills
+        if "status" in employee_skills_df.columns:
+            es_valid = employee_skills_df[employee_skills_df["status"].str.upper() != "EXPIRED"].copy()
+        else:
+            es_valid = employee_skills_df.copy()
+
+        # Check freshness: last_evaluated_date <= 548 days (18 months)
+        if "last_evaluated_date" in es_valid.columns:
+            eval_dt = pd.to_datetime(es_valid["last_evaluated_date"], errors="coerce")
+            scenario_dt = pd.Timestamp("2026-11-11")
+            is_stale = (scenario_dt - eval_dt).dt.days > 548
+            es_valid = es_valid[~is_stale]
+
+        skill_lookup = es_valid[[c for c in skill_cols_avail if c in es_valid.columns]].copy()
+        if "proficiency_level" not in skill_lookup.columns:
+            skill_lookup["proficiency_level"] = 3
     else:
         skill_lookup = pd.DataFrame(columns=["employee_id", "skill_id", "proficiency_level"])
 
-    # Build allocated FTE per employee (sum across all allocations, capped at 1.0)
+    # Build allocated FTE per employee (sum across allocations, support allocation_percentage)
     if not allocations_df.empty:
-        alloc_col = None
-        for c in ("allocated_fte", "allocation_pct", "fte"):
-            if c in allocations_df.columns:
-                alloc_col = c
-                break
-        if alloc_col:
-            emp_alloc = (
-                allocations_df.groupby("employee_id")[alloc_col]
-                .sum()
-                .clip(upper=1.0)
-                .reset_index()
-                .rename(columns={alloc_col: "total_allocated_fte"})
-            )
+        alloc_work = allocations_df.copy()
+        if "allocation_percentage" in alloc_work.columns:
+            alloc_work["_fte_val"] = alloc_work["allocation_percentage"].astype(float) / 100.0
+        elif "allocated_fte" in alloc_work.columns:
+            alloc_work["_fte_val"] = alloc_work["allocated_fte"].astype(float)
+        elif "fte" in alloc_work.columns:
+            alloc_work["_fte_val"] = alloc_work["fte"].astype(float)
         else:
-            emp_alloc = pd.DataFrame(columns=["employee_id", "total_allocated_fte"])
+            alloc_work["_fte_val"] = 0.5
+
+        emp_alloc = (
+            alloc_work.groupby("employee_id")["_fte_val"]
+            .sum()
+            .clip(upper=1.0)
+            .reset_index()
+            .rename(columns={"_fte_val": "total_allocated_fte"})
+        )
     else:
         emp_alloc = pd.DataFrame(columns=["employee_id", "total_allocated_fte"])
 
@@ -287,6 +314,7 @@ def _compute_forecasts(
 
         risk = _risk_level(utilization_pct)
 
+        forecast_id = f"FCST-{period}-{role_id}-{skill_id}"
         results.append(
             ForecastResult(
                 period=period,
@@ -297,6 +325,13 @@ def _compute_forecasts(
                 gap_fte=round(gap_fte, 4),
                 utilization_pct=round(utilization_pct, 2),
                 risk_level=risk,
+                project_id="ALL",
+                forecast_id=forecast_id,
+                already_allocated_fte=0.0,
+                qualified_available_fte=round(supply_fte, 4),
+                remaining_supply_fte=max(0.0, round(supply_fte - demand_fte, 4)),
+                calculation_timestamp="2026-11-11T12:00:00",
+                assumptions=f"Proficiency threshold >= {req_prof}; Active & non-stale <= 18 months",
             )
         )
 
@@ -433,3 +468,7 @@ def run_forecast(
     if session is not None:
         return forecast_db(session, period_start=period_start, period_end=period_end, granularity=granularity)
     return forecast_csv(period_start=period_start, period_end=period_end, granularity=granularity)
+
+
+# Alias for compatibility with external callers
+get_demand_forecast = run_forecast

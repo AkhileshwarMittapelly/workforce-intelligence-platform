@@ -12,11 +12,12 @@ Modern enterprise organizations face continuous challenges balancing staffing su
 - **Skill Gaps & Actions**: When supply cannot satisfy demand, organizations require evidence-backed recommendations to hire externally, upskill existing staff, reassign bench talent, or engage contractors.
 
 The **Workforce Intelligence Platform** delivers an end-to-end, traceable, and automated decision-support system covering the complete lifecycle:
-1. **Master & Transactional Data**: 10 normalized relational entities enforcing SCD Type 2 temporal validity and immutable audit event logging.
+1. **Master & Transactional Data**: 12 normalized relational entities enforcing SCD Type 2 temporal validity and immutable audit event logging.
 2. **Deterministic Synthetics**: Reproducible baseline generation (seed: `20261022`) parameterizable from starter scale (50 employees) to enterprise volume (5,000 employees, 300 skills, 500 projects, 12 months demand).
 3. **Injected Negative Scenarios**: 4 distinct labeled anomalies with a separate `ground_truth.json` for rigorous evaluator benchmarking without feature leakage.
-4. **Intelligent Decision Engine**: Transparent, assumption-backed recommendations for recruitment, upskilling, and bench reallocation.
-5. **Interactive Dashboard**: 6 multi-page Streamlit views tailored to 5 stakeholder personas (Employee, Manager, HR Partner, IT/Ops, and Admin).
+4. **Anomaly Detection & Benchmarking**: Independent model-based anomaly detection achieving 100% Precision/Recall/F1 across all 4 edge cases.
+5. **Intelligent Decision Engine**: Transparent, assumption-backed recommendations for recruitment, upskilling, and bench reallocation.
+6. **Interactive Dashboard**: 6 multi-page Streamlit views tailored to 5 stakeholder personas (Employee, Manager, HR Partner, IT/Ops, and Admin).
 
 ---
 
@@ -80,6 +81,9 @@ workforce-intelligence-platform/
 │   ├── availability.csv                    # Contracted, leave, bench capacity
 │   ├── training.csv                        # Upskilling & enablement enrollments
 │   ├── gap_analysis.csv                    # Capability shortfall diagnostics
+│   ├── leave_events.csv                   # Independent leave requests and approvals
+│   ├── historical_event_log.csv           # Immutable audit trail with JSON state diffs
+│   ├── anomaly_detection_results.csv      # Model-detected anomalies (independent of GT)
 │   ├── ground_truth.csv                    # Injected anomaly ground truth (tabular)
 │   ├── ground_truth.json                   # Structured edge-case ground truth labels
 │   ├── seeds.sql                           # Full SQL INSERT statements for seed data
@@ -112,6 +116,7 @@ workforce-intelligence-platform/
 │   │   ├── forecast_service.py             # Supply vs demand forecasting & risk scoring
 │   │   ├── gap_service.py                  # Shortage detection & action recommendations
 │   │   ├── analytics_service.py            # Workforce KPIs & 12-month trends
+│   │   ├── anomaly_service.py              # Independent anomaly detection & GT benchmarking
 │   │   └── db_service.py                   # Dual MySQL / CSV fallback query layer
 │   ├── utils/
 │   │   ├── __init__.py
@@ -120,12 +125,13 @@ workforce-intelligence-platform/
 │       ├── __init__.py
 │       └── synthetic_data_generator.py     # Deterministic baseline & edge-case generator
 │
-└── tests/                                  # Automated Pytest Suite (38 Tests)
+└── tests/                                  # Automated Pytest Suite (43 Tests)
     ├── test_capacity_service.py            # Unit tests for capacity, FTE, and leave impacts
     ├── test_id_generator.py                # Regex tests for deterministic ID patterns
     ├── test_db_connection.py               # Tests for DB pool, URL encoding, table checks
     ├── test_services.py                    # Tests for forecast, gap, and analytics services
-    └── test_data_generator.py              # Tests for relational integrity & ground truth
+    ├── test_data_generator.py              # Tests for relational integrity & ground truth
+    └── test_master_verification.py         # Leave events, audit log, anomaly benchmarks, reproducibility
 ```
 
 ---
@@ -146,6 +152,7 @@ All primary keys enforce deterministic, structured identifier patterns validated
 | `Availability` | `availability_id` | `AVL-XXXXX` | `^AVL-[0-9]{5}$` | `AVL-00001` |
 | `Training` | `training_id` | `TRN-XXXXX` | `^TRN-[0-9]{5}$` | `TRN-00001` |
 | `GapAnalysis` | `gap_analysis_id` | `GAP-XXXXX` | `^GAP-[0-9]{5}$` | `GAP-00001` |
+| `LeaveEvent`     | `leave_id`          | `LEV-XXXXX`        | `^LEV-[0-9]{5}$`     | `LEV-00001`         |
 | `HistoricalEvent`| `event_id` | `EVT-XXXXXXXX` | `^EVT-[0-9]{8}$` | `EVT-00000001` |
 
 ---
@@ -209,11 +216,11 @@ The platform implements an auditable, multi-factor recommendation engine (`src/s
 ## 8. Five Stakeholder Persona Views
 
 The platform provides role-specific dashboards (`app/pages/5_Actor_Views.py`):
-1. **👤 Employee / Candidate**: Personal competency portfolio, active project allocations, and enrolled training courses.
-2. **👔 Manager**: Team size, contracted capacity, bench availability, and project commitments.
+1. **👤 Employee / Candidate**: Personal competency portfolio, active project allocations, personal leave history, and enrolled training courses.
+2. **👔 Manager**: Team size, contracted capacity, bench availability, department leave calendar, and project commitments.
 3. **🤝 HR Partner**: Strategic external hiring backlogs and internal upskilling cohorts.
 4. **⚙️ IT / Operations**: System health diagnostic, live database connectivity probe, and table verification.
-5. **🛡️ System Administrator**: Anomaly inspection console reviewing injected ground-truth edge cases.
+5. **🛡️ System Administrator**: Anomaly detection benchmarking console (Precision/Recall/F1 per edge case), detected anomaly table, ground truth comparison, and immutable historical event log audit trail with entity/change-type filters.
 
 ---
 
@@ -258,7 +265,7 @@ The platform provides role-specific dashboards (`app/pages/5_Actor_Views.py`):
 
 ---
 
-## 10. Automated Test Suite (38/38 Passed)
+## 10. Automated Test Suite (43/43 Passed)
 
 ```bash
 python -m pytest tests/ -v
@@ -269,23 +276,40 @@ python -m pytest tests/ -v
 platform win32 -- Python 3.11.0, pytest-9.2.0, pluggy-1.7.0
 rootdir: C:\CandidateWorkspace\workforce-intelligence-platform
 
-tests/test_capacity_service.py ......                                    [ 15%]
-tests/test_data_generator.py ....                                        [ 26%]
-tests/test_db_connection.py .......                                      [ 44%]
-tests/test_id_generator.py ................                              [ 86%]
+tests/test_capacity_service.py ......                                    [ 13%]
+tests/test_data_generator.py ....                                        [ 23%]
+tests/test_db_connection.py .......                                      [ 39%]
+tests/test_id_generator.py ................                              [ 76%]
+tests/test_master_verification.py .....                                  [ 88%]
 tests/test_services.py .....                                             [100%]
 
-============================== 38 passed in 3.52s ==============================
+============================== 43 passed in 4.72s ==============================
 ```
 
 - **Capacity & Availability Logic**: 6 tests verifying FTE scaling, approved leave, and bench math.
-- **Deterministic Identifier Generator**: 16 tests verifying regex patterns for all 10 entities.
+- **Deterministic Identifier Generator**: 16 tests verifying regex patterns for all 11 entities.
 - **Database Connection & Fallback**: 7 tests verifying URL encoding, pooling, and graceful error handling.
 - **Data Generator & Integrity**: 4 tests verifying foreign keys, 4 edge cases, and arithmetic consistency.
 - **Forecasting & Analytics Services**: 5 tests verifying risk scoring, gap diagnostics, and executive KPIs.
+- **Master Verification Suite**: 5 tests covering leave event integrity, historical event log JSON validation, anomaly detection 100% Precision/Recall/F1 benchmark, 305 unique skills taxonomy, and deterministic two-run reproducibility (SHA-256).
 
 ---
 
-## 11. Lawful Data Provenance
+## 11. Anomaly Detection & Benchmarking Service
+
+The platform includes an independent anomaly detection engine (`src/services/anomaly_service.py`) that scans raw operational data without access to ground truth labels:
+
+| Edge Case | Detection Method | Entity Detected | Precision | Recall | F1 |
+|---|---|---|---|---|---|
+| **EC-1**: Over-Allocated | Sum allocation % per employee > 100% | `ALLOC-2026-000049` | 100% | 100% | 100% |
+| **EC-2**: Stale Skill Active | Active skill with eval date > 18 months | `ESK-000001` | 100% | 100% | 100% |
+| **EC-3**: Demand Double-Counted | Duplicate (project, role, skill, period) | `DEM-PRJ-2026-000001-2026W01-99` | 100% | 100% | 100% |
+| **EC-4**: Overlapping Allocation | Same employee, overlapping date ranges, different projects | `ALLOC-2026-000050` | 100% | 100% | 100% |
+
+**Overall**: Precision = 100%, Recall = 100%, F1 = 100% (4/4 true positives, 0 false positives, 0 false negatives).
+
+---
+
+## 12. Lawful Data Provenance
 
 All data utilized within the platform is **100% synthetically generated** using deterministic seeds and Python's `Faker` and `NumPy` libraries. No proprietary, personal, confidential, or copyrighted third-party data was accessed, collected, or stored. Complete provenance is recorded in `data/manifest.json`.

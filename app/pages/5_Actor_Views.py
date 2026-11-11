@@ -22,7 +22,10 @@ from src.services.db_service import (
     get_skills,
     get_roles,
     get_availability,
+    get_leave_events,
+    get_historical_event_log,
 )
+from src.services.anomaly_service import detect_anomalies, evaluate_anomalies
 from src.db.connection import test_connection
 from app.components.kpi_cards import render_kpi_row, render_alert_banner
 
@@ -30,6 +33,8 @@ st.set_page_config(page_title="Stakeholder Persona Views", page_icon="👥", lay
 
 st.title("👥 Stakeholder & Actor Persona Workflows")
 st.caption("Tailored decision views for Employee, Manager, HR Partner, IT/Operations, and System Administrator")
+
+st.info("ℹ️ **Persona Switcher:** This panel provides simulated role-based interfaces to demonstrate actor-specific decision workflows and access contexts. It is an analytical workflow demonstration, not an identity authentication or authorization boundary.")
 
 tab_emp, tab_mgr, tab_hr, tab_ops, tab_admin = st.tabs([
     "👤 Employee / Candidate",
@@ -76,6 +81,14 @@ with tab_emp:
         else:
             st.info("Currently unallocated / on bench.")
 
+        st.markdown("#### 🏖️ Personal Leave Requests & Time-Off History")
+        leave_df = get_leave_events(employee_id=selected_emp_id)
+        if not leave_df.empty:
+            display_leave = [c for c in ["leave_id", "leave_type", "start_date", "end_date", "leave_hours", "approval_status", "reason"] if c in leave_df.columns]
+            st.dataframe(leave_df[display_leave], use_container_width=True, hide_index=True)
+        else:
+            st.info("No leave records submitted for this employee.")
+
         st.markdown("#### Upskilling & Enrolled Training")
         trn_df = get_training(employee_id=selected_emp_id)
         if not trn_df.empty:
@@ -94,6 +107,7 @@ with tab_mgr:
         depts = sorted(emp_df["department"].dropna().unique().tolist())
         sel_dept = st.selectbox("Select Managing Department", depts)
         dept_emps = emp_df[emp_df["department"] == sel_dept]
+        dept_emp_ids = set(dept_emps["employee_id"])
 
         m1, m2, m3 = st.columns(3)
         m1.metric("Department Team Size", len(dept_emps))
@@ -102,10 +116,20 @@ with tab_mgr:
 
         st.markdown("#### Team Availability & Bench Status")
         if not avail_df.empty:
-            dept_emp_ids = set(dept_emps["employee_id"])
             dept_avail = avail_df[avail_df["employee_id"].isin(dept_emp_ids)]
             if not dept_avail.empty:
                 st.dataframe(dept_avail[["employee_id", "base_capacity_hours", "contracted_capacity_hours", "approved_leave_hours", "allocated_hours", "net_available_hours", "availability_percentage", "availability_type"]], use_container_width=True, hide_index=True)
+            else:
+                st.info("No availability metrics for this department.")
+
+        st.markdown("#### 📅 Team Leave Requests & Planned Time-Off")
+        all_leaves = get_leave_events()
+        if not all_leaves.empty:
+            dept_leaves = all_leaves[all_leaves["employee_id"].isin(dept_emp_ids)]
+            if not dept_leaves.empty:
+                st.dataframe(dept_leaves[["leave_id", "employee_id", "leave_type", "start_date", "end_date", "leave_hours", "approval_status", "reason"]], use_container_width=True, hide_index=True)
+            else:
+                st.info("No active leave requests for team members.")
 
 # -----------------------------------------------------------------------------
 # TAB 3: HR PARTNER
@@ -166,15 +190,73 @@ with tab_ops:
 # TAB 5: SYSTEM ADMINISTRATOR
 # -----------------------------------------------------------------------------
 with tab_admin:
-    st.subheader("Administration & Ground-Truth Anomaly Inspection")
-    gt_file = _PROJECT_ROOT / "data" / "ground_truth.json"
+    st.subheader("System Administration, Anomaly Benchmarking & Audit Trail")
 
+    st.markdown("### 🔍 Model-Based Anomaly Detection & Benchmarking")
+    st.caption("Independent anomaly detection executed against raw operational data and evaluated against isolated ground truth.")
+
+    # Execute independent anomaly detection
+    det_df = detect_anomalies()
+    eval_res = evaluate_anomalies()
+
+    if eval_res.get("status") == "EVALUATED":
+        c_k1, c_k2, c_k3, c_k4 = st.columns(4)
+        c_k1.metric("Ground Truth Injected", eval_res.get("total_ground_truth", 0))
+        c_k2.metric("Anomalies Detected", eval_res.get("total_detected", 0))
+        c_k3.metric("True Positives", eval_res.get("true_positives", 0))
+        c_k4.metric("Precision / Recall / F1", f"{eval_res.get('overall_precision', 1.0) * 100:.0f}% / {eval_res.get('overall_recall', 1.0) * 100:.0f}% / {eval_res.get('overall_f1', 1.0) * 100:.0f}%")
+
+        st.markdown("#### Category-by-Category Benchmark Evaluation")
+        cat_rows = []
+        for code, cat_info in eval_res.get("categories", {}).items():
+            cat_rows.append({
+                "Edge Case": code,
+                "Ground Truth Count": cat_info["ground_truth_count"],
+                "Detected Count": cat_info["detected_count"],
+                "True Positives": cat_info["true_positives"],
+                "Precision": f"{cat_info['precision'] * 100:.1f}%",
+                "Recall": f"{cat_info['recall'] * 100:.1f}%",
+                "F1 Score": f"{cat_info['f1_score'] * 100:.1f}%",
+            })
+        st.dataframe(pd.DataFrame(cat_rows), use_container_width=True, hide_index=True)
+
+    if not det_df.empty:
+        st.markdown("#### 🚨 Detected Operational Anomalies (Model Output)")
+        display_det = [c for c in ["anomaly_id", "edge_case_label", "issue_type", "entity_id", "employee_id", "project_id", "detail", "detected_at"] if c in det_df.columns]
+        st.dataframe(det_df[display_det], use_container_width=True, hide_index=True)
+    else:
+        st.success("No anomalies detected in active dataset.")
+
+    st.markdown("---")
+    st.markdown("### 🎯 Ground Truth Labeled Edge Cases (Reference Baseline)")
+    gt_file = _PROJECT_ROOT / "data" / "ground_truth.json"
     if gt_file.exists():
         with open(gt_file, "r", encoding="utf-8") as f:
             gt_data = json.load(f)
-
-        st.markdown("#### Injected Labeled Edge Cases (Evaluation Ground Truth)")
-        st.info("The following anomalies were injected into synthetic data for rigorous evaluator validation without leaking into analytical models.")
         st.dataframe(pd.DataFrame(gt_data), use_container_width=True, hide_index=True)
     else:
-        st.warning("Ground truth file not generated yet. Run synthetic data generator.")
+        st.info("Ground truth file not available.")
+
+    st.markdown("---")
+    st.markdown("### 📜 Immutable Historical Event Log & Audit Trail")
+    events_df = get_historical_event_log()
+    if not events_df.empty:
+        f_col1, f_col2 = st.columns(2)
+        with f_col1:
+            entity_types = ["ALL"] + sorted(events_df["entity_type"].dropna().unique().tolist()) if "entity_type" in events_df.columns else ["ALL"]
+            sel_ent_type = st.selectbox("Filter Entity Type", entity_types)
+        with f_col2:
+            change_types = ["ALL"] + sorted(events_df["event_type"].dropna().unique().tolist()) if "event_type" in events_df.columns else ["ALL"]
+            sel_chg_type = st.selectbox("Filter Change Type", change_types)
+
+        f_events = events_df.copy()
+        if sel_ent_type != "ALL":
+            f_events = f_events[f_events["entity_type"] == sel_ent_type]
+        if sel_chg_type != "ALL":
+            f_events = f_events[f_events["event_type"] == sel_chg_type]
+
+        display_evt = [c for c in ["event_id", "event_timestamp", "entity_type", "entity_id", "event_type", "performed_by", "reason", "old_state", "new_state"] if c in f_events.columns]
+        st.dataframe(f_events[display_evt].head(100), use_container_width=True, hide_index=True)
+        st.caption(f"Showing {min(len(f_events), 100)} of {len(f_events)} audit events recorded.")
+    else:
+        st.info("No historical event logs recorded.")

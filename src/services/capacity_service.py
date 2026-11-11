@@ -19,6 +19,7 @@ class CapacityMetrics:
     net_available_hours: Decimal
     availability_percentage: Decimal
     availability_type: str
+    utilization_percentage: Decimal = Decimal("0.00")
 
 
 def calculate_capacity(
@@ -48,12 +49,19 @@ def calculate_capacity(
     remaining_after_leave = max(Decimal("0.00"), contracted - leave)
     net_available = max(Decimal("0.00"), remaining_after_leave - allocated).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    # 3. Availability percentage
+    # 3. Availability and Utilization percentages
     if contracted > Decimal("0.00"):
         raw_pct = (net_available / contracted) * Decimal("100.00")
         pct = min(Decimal("100.00"), max(Decimal("0.00"), raw_pct)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     else:
         pct = Decimal("0.00")
+
+    if remaining_after_leave > Decimal("0.00"):
+        util_pct = ((allocated / remaining_after_leave) * Decimal("100.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    elif allocated > Decimal("0.00"):
+        util_pct = Decimal("100.00")
+    else:
+        util_pct = Decimal("0.00")
 
     # 4. Determine availability classification
     if leave >= contracted and contracted > Decimal("0.00"):
@@ -74,4 +82,5 @@ def calculate_capacity(
         net_available_hours=net_available,
         availability_percentage=pct,
         availability_type=avail_type,
+        utilization_percentage=util_pct,
     )

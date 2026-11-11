@@ -36,7 +36,10 @@ def _query_or_fallback(query: str, csv_name: str) -> pd.DataFrame:
     try:
         engine = get_engine()
         with engine.connect() as conn:
-            df = pd.read_sql_query(text(query), con=conn)
+            import warnings
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                df = pd.read_sql_query(text(query), con=conn)
             if not df.empty:
                 return df
     except Exception as e:
@@ -121,4 +124,26 @@ def get_gap_analyses(severity: Optional[str] = None) -> pd.DataFrame:
     df = _query_or_fallback("SELECT * FROM gap_analysis", "gap_analysis.csv")
     if not df.empty and severity:
         df = df[df["gap_severity"] == severity]
+    return df
+
+
+def get_leave_events(employee_id: Optional[str] = None, approval_status: Optional[str] = None) -> pd.DataFrame:
+    """Return independent leave event requests and approvals."""
+    df = _query_or_fallback("SELECT * FROM leave_event", "leave_events.csv")
+    if not df.empty:
+        if employee_id:
+            df = df[df["employee_id"] == employee_id]
+        if approval_status:
+            df = df[df["approval_status"] == approval_status]
+    return df
+
+
+def get_historical_event_log(entity_type: Optional[str] = None, entity_id: Optional[str] = None) -> pd.DataFrame:
+    """Return immutable historical audit events."""
+    df = _query_or_fallback("SELECT * FROM historical_event_log", "historical_event_log.csv")
+    if not df.empty:
+        if entity_type:
+            df = df[df["entity_type"] == entity_type]
+        if entity_id:
+            df = df[df["entity_id"] == entity_id]
     return df

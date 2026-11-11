@@ -6,20 +6,21 @@ from pathlib import Path
 import sys
 import pandas as pd
 import streamlit as st
+import plotly.express as px
+import plotly.graph_objects as go
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from src.services.db_service import get_demand_plans, get_projects, get_roles, get_skills
+from src.services.forecast_service import run_forecast, ForecastResult
 from app.components.kpi_cards import render_kpi_row, render_alert_banner
-import plotly.express as px
-import plotly.graph_objects as go
 
 st.set_page_config(page_title="Demand Forecasting", page_icon="📈", layout="wide")
 
 st.title("📈 Forward-Looking Staffing Demand & Forecasting")
-st.caption("Forecast project labor requirements by role, skill, and schedule vs. workforce supply")
+st.caption("Forecast project labor requirements by role, skill, and schedule vs. workforce supply with risk analysis")
 
 demand_df = get_demand_plans()
 projects_df = get_projects()
@@ -38,32 +39,53 @@ if not roles_df.empty and "role_name" in roles_df.columns:
 if not skills_df.empty and "skill_name" in skills_df.columns:
     demand_df = demand_df.merge(skills_df[["skill_id", "skill_name"]], left_on="required_skill_id", right_on="skill_id", how="left")
 
+# Execute live demand vs supply forecast
+forecast_records = run_forecast()
+fcst_df = pd.DataFrame([vars(r) for r in forecast_records]) if forecast_records else pd.DataFrame()
+
+# Enrich forecast with role and skill names
+if not fcst_df.empty:
+    if not roles_df.empty and "role_name" in roles_df.columns:
+        fcst_df = fcst_df.merge(roles_df[["role_id", "role_name"]], on="role_id", how="left")
+    if not skills_df.empty and "skill_name" in skills_df.columns:
+        fcst_df = fcst_df.merge(skills_df[["skill_id", "skill_name"]], on="skill_id", how="left")
+
 # High-level KPIs
 total_demand_records = len(demand_df)
 total_required_fte = demand_df["required_fte"].sum() if "required_fte" in demand_df.columns else 0.0
-total_headcount = demand_df["headcount_required"].sum() if "headcount_required" in demand_df.columns else 0
+total_headcount = int(demand_df["headcount_required"].sum()) if "headcount_required" in demand_df.columns else 0
 unfulfilled = len(demand_df[demand_df["fulfillment_status"] == "UNFULFILLED"]) if "fulfillment_status" in demand_df.columns else 0
 
+total_shortage_fte = fcst_df[fcst_df["gap_fte"] > 0]["gap_fte"].sum() if not fcst_df.empty else 0.0
+critical_risks = len(fcst_df[fcst_df["risk_level"] == "CRITICAL"]) if not fcst_df.empty else 0
+
 render_kpi_row({
-    "Demand Records": total_demand_records,
-    "Total Required FTE": f"{total_required_fte:.1f}",
-    "Total Headcount Req": total_headcount,
+    "Demand Plans": total_demand_records,
+    "Required FTE": f"{total_required_fte:.1f}",
+    "Total Shortage FTE": f"{total_shortage_fte:.1f}",
+    "Critical Risk Periods": critical_risks,
     "Unfulfilled Requests": unfulfilled,
 })
+
+if critical_risks > 0:
+    render_alert_banner("critical", f"Detected {critical_risks} critical shortage periods where demand outstrips active workforce capacity!")
 
 st.markdown("---")
 
 # Filters
-col1, col2, col3 = st.columns(3)
+col1, col2, col3, col4 = st.columns(4)
 with col1:
     priorities = ["ALL"] + sorted(demand_df["priority"].dropna().unique().tolist()) if "priority" in demand_df.columns else ["ALL"]
-    sel_priority = st.selectbox("Filter Priority", priorities)
+    sel_priority = st.selectbox("Demand Priority", priorities)
 with col2:
     status_opts = ["ALL"] + sorted(demand_df["fulfillment_status"].dropna().unique().tolist()) if "fulfillment_status" in demand_df.columns else ["ALL"]
     sel_status = st.selectbox("Fulfillment Status", status_opts)
 with col3:
     role_opts = ["ALL"] + sorted(demand_df["role_name"].dropna().unique().tolist()) if "role_name" in demand_df.columns else ["ALL"]
     sel_role = st.selectbox("Role Filter", role_opts)
+with col4:
+    risk_opts = ["ALL", "CRITICAL", "HIGH", "MEDIUM", "LOW"]
+    sel_risk = st.selectbox("Forecast Risk Level", risk_opts)
 
 filtered_df = demand_df.copy()
 if sel_priority != "ALL":
@@ -73,12 +95,42 @@ if sel_status != "ALL":
 if sel_role != "ALL" and "role_name" in filtered_df.columns:
     filtered_df = filtered_df[filtered_df["role_name"] == sel_role]
 
+filtered_fcst = fcst_df.copy() if not fcst_df.empty else pd.DataFrame()
+if not filtered_fcst.empty:
+    if sel_role != "ALL" and "role_name" in filtered_fcst.columns:
+        filtered_fcst = filtered_fcst[filtered_fcst["role_name"] == sel_role]
+    if sel_risk != "ALL" and "risk_level" in filtered_fcst.columns:
+        filtered_fcst = filtered_fcst[filtered_fcst["risk_level"] == sel_risk]
+
 # Charts Section
 col_chart1, col_chart2 = st.columns(2)
 
 with col_chart1:
-    st.subheader("FTE Demand by Role")
-    if "role_name" in filtered_df.columns and "required_fte" in filtered_df.columns:
+    st.subheader("FTE Demand vs. Shortage by Role")
+    if not filtered_fcst.empty and "role_name" in filtered_fcst.columns:
+        role_agg = filtered_fcst.groupby("role_name").agg({
+            "demand_fte": "sum",
+            "gap_fte": "sum",
+        }).reset_index().sort_values(by="demand_fte", ascending=False).head(10)
+        
+        fig_role = go.Figure()
+        fig_role.add_trace(go.Bar(
+            y=role_agg["role_name"], x=role_agg["demand_fte"],
+            name="Demand FTE", orientation="h", marker_color="#3498db"
+        ))
+        fig_role.add_trace(go.Bar(
+            y=role_agg["role_name"], x=role_agg["gap_fte"],
+            name="Shortage FTE", orientation="h", marker_color="#e74c3c"
+        ))
+        fig_role.update_layout(
+            barmode="group",
+            yaxis=dict(autorange="reversed"),
+            height=350,
+            margin=dict(l=20, r=20, t=30, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        )
+        st.plotly_chart(fig_role, use_container_width=True)
+    elif "role_name" in filtered_df.columns and "required_fte" in filtered_df.columns:
         role_sum = filtered_df.groupby("role_name")["required_fte"].sum().reset_index().sort_values(by="required_fte", ascending=False).head(10)
         fig_role = px.bar(
             role_sum, x="required_fte", y="role_name", orientation="h",
@@ -89,8 +141,18 @@ with col_chart1:
         st.plotly_chart(fig_role, use_container_width=True)
 
 with col_chart2:
-    st.subheader("Demand Fulfillment Breakdown")
-    if "fulfillment_status" in filtered_df.columns:
+    st.subheader("Forecast Risk Severity Distribution")
+    if not filtered_fcst.empty and "risk_level" in filtered_fcst.columns:
+        risk_counts = filtered_fcst["risk_level"].value_counts().reset_index()
+        risk_counts.columns = ["Risk Level", "Count"]
+        color_map = {"CRITICAL": "#e74c3c", "HIGH": "#e67e22", "MEDIUM": "#f1c40f", "LOW": "#2ecc71"}
+        fig_pie = px.pie(
+            risk_counts, names="Risk Level", values="Count",
+            color="Risk Level", color_discrete_map=color_map, hole=0.4
+        )
+        fig_pie.update_layout(height=350, margin=dict(l=20, r=20, t=30, b=20))
+        st.plotly_chart(fig_pie, use_container_width=True)
+    elif "fulfillment_status" in filtered_df.columns:
         fig_pie = px.pie(
             filtered_df, names="fulfillment_status",
             color_discrete_sequence=["#e74c3c", "#f39c12", "#2ecc71", "#95a5a6"],
@@ -100,6 +162,25 @@ with col_chart2:
         st.plotly_chart(fig_pie, use_container_width=True)
 
 # Forecast Table
+st.subheader("📊 Forecast Model Output & Supply-Demand Equilibrium")
+if not filtered_fcst.empty:
+    display_fcst_cols = [c for c in [
+        "period", "role_name", "skill_name", "demand_fte", "supply_fte",
+        "gap_fte", "utilization_pct", "risk_level", "assumptions"
+    ] if c in filtered_fcst.columns]
+    st.dataframe(filtered_fcst[display_fcst_cols], use_container_width=True, hide_index=True)
+
+    fcst_csv = filtered_fcst[display_fcst_cols].to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="📥 Download Forecast Model Output (CSV)",
+        data=fcst_csv,
+        file_name="forecast_model_results.csv",
+        mime="text/csv",
+    )
+else:
+    st.info("No forecast results available for current filter criteria.")
+
+# Staffing Demand Schedule Table
 st.subheader("📋 Staffing Demand Schedule & Timeline")
 display_cols = [c for c in ["demand_id", "project_name", "role_name", "skill_name", "headcount_required", "required_fte", "priority", "fulfillment_status", "start_date", "end_date"] if c in filtered_df.columns]
 st.dataframe(filtered_df[display_cols], use_container_width=True, hide_index=True)
@@ -107,8 +188,8 @@ st.dataframe(filtered_df[display_cols], use_container_width=True, hide_index=Tru
 # CSV Download
 csv_data = filtered_df[display_cols].to_csv(index=False).encode("utf-8")
 st.download_button(
-    label="📥 Download Filtered Demand Schedule as CSV",
+    label="📥 Download Staffing Demand Schedule (CSV)",
     data=csv_data,
-    file_name="demand_forecast.csv",
+    file_name="demand_schedule.csv",
     mime="text/csv",
 )

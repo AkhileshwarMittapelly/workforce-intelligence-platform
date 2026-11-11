@@ -29,6 +29,7 @@ class EntityPrefix(str, Enum):
     AVAILABILITY = "AVL"
     TRAINING = "TRN"
     GAP_ANALYSIS = "GAP"
+    LEAVE_EVENT = "LEV"
     HISTORICAL_EVENT = "EVT"
 
 
@@ -43,6 +44,7 @@ ID_REGEX_PATTERNS: dict[EntityPrefix, str] = {
     EntityPrefix.AVAILABILITY: r"^AVL-[0-9]{5}$",
     EntityPrefix.TRAINING: r"^TRN-[0-9]{5}$",
     EntityPrefix.GAP_ANALYSIS: r"^GAP-[0-9]{5}$",
+    EntityPrefix.LEAVE_EVENT: r"^LEV-[0-9]{5}$",
     EntityPrefix.HISTORICAL_EVENT: r"^EVT-[0-9]{8}$",
 }
 
@@ -79,6 +81,11 @@ def generate_allocation_id(year: int, sequence_num: int) -> str:
     return f"{EntityPrefix.ALLOCATION.value}-{year}-{str(sequence_num).zfill(6)}"
 
 
+def generate_leave_id(sequence_num: int) -> str:
+    """Formats a leave event ID: LEV-00001 (5 digits)."""
+    return f"{EntityPrefix.LEAVE_EVENT.value}-{str(sequence_num).zfill(5)}"
+
+
 def format_deterministic_id(
     entity: EntityPrefix,
     sequence_num: int,
@@ -110,6 +117,8 @@ def format_deterministic_id(
         return f"{EntityPrefix.TRAINING.value}-{str(sequence_num).zfill(5)}"
     elif entity == EntityPrefix.GAP_ANALYSIS:
         return f"{EntityPrefix.GAP_ANALYSIS.value}-{str(sequence_num).zfill(5)}"
+    elif entity == EntityPrefix.LEAVE_EVENT:
+        return generate_leave_id(sequence_num)
     elif entity == EntityPrefix.HISTORICAL_EVENT:
         return f"{EntityPrefix.HISTORICAL_EVENT.value}-{str(sequence_num).zfill(8)}"
     else:

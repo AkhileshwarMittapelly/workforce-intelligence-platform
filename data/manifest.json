@@ -3,10 +3,13 @@
   "generator_command": "python src/generators/synthetic_data_generator.py --scale starter --seed 20261022",
   "seed": 20261022,
   "scale": "starter",
+  "scenario_date": "2026-11-11",
+  "planning_horizon": "12 Months (2026W01 to 2026W52)",
   "provenance": {
     "source_type": "100% Synthetic Data",
     "lawful_use_notice": "Generated deterministically via Python Faker and NumPy seeded RNG. No proprietary, personal, or copyrighted third-party data was accessed or scraped.",
-    "jurisdiction_compliance": "Fully compliant with public data and synthetic data generation guidelines."
+    "jurisdiction_compliance": "Fully compliant with public data and synthetic data generation guidelines.",
+    "license": "MIT / Hackathon Evaluation License"
   },
   "entities": {
     "roles.csv": 15,
@@ -14,12 +17,31 @@
     "skills.csv": 30,
     "employee_skills.csv": 232,
     "projects.csv": 20,
-    "demand_plans.csv": 48,
-    "allocations.csv": 51,
+    "demand_plans.csv": 73,
+    "leave_events.csv": 98,
+    "allocations.csv": 50,
     "availability.csv": 49,
+    "gap_analysis.csv": 73,
     "training.csv": 50,
-    "gap_analysis.csv": 48
+    "historical_event_log.csv": 465
   },
-  "edge_cases_injected": 5,
-  "reproducibility_md5": "bf1f5d5950222a28b5a020bcaf6c30b6"
+  "edge_cases_injected": 4,
+  "reproducibility_sha256": "482d54e65f4b247318abcdd34824a43ee109e5dac72d464a5799a30bd87ef651",
+  "file_checksums_sha256": {
+    "allocations.csv": "4da7ae899ec99f04bfa07c85bd6ac63ccf653583bf642009c7d8a8fa1c6f1675",
+    "anomaly_detection_results.csv": "b0a8b9ee1803f641fe711c6e79991d1574320d1ea83d68e56d4aa42f2b4cc86a",
+    "availability.csv": "0319ea4d75febc4142e6a94b04891237e1714524da9f3087359d7e5771832bcd",
+    "demand_plans.csv": "e220c82f35c8b6dca6c1833b83f96b559135c2da79e37ad220e6b2d004e73b5f",
+    "employees.csv": "1c7fc7bcb3b9140dddf7198168a839f51b281521248f93da65be0ffac990fde8",
+    "employee_skills.csv": "9a02d67679f43b4545413b3096323e8ba8837826d2570e844e26ab563db70458",
+    "gap_analysis.csv": "c6c80644f3c6cea4b5865a3dd3d83e081911f0a7ac0754942df63a95bbf57ad0",
+    "ground_truth.csv": "9eeea51d39f7b920d031c77abbb3824c142f26e7afe5bd3a4b90cc4264f77cdc",
+    "historical_event_log.csv": "59f59dc2ec37dc470de1626f0669aa1b5f5ca0b11ab27f5e9c4a089016639db0",
+    "leave_events.csv": "19172c2557848382114d6ee5b43c7a22c60b5d1c9dc7a32c3bb90e6c87eab435",
+    "projects.csv": "e62a4a0d3e55bb7ddb0d5201c8c2531c09519b081c83b79d9336f67777de6eba",
+    "roles.csv": "40cbeb943998ab6a46b6c12e3caa9a7b4462c7804f7b5ec924e6fba20ad98cb5",
+    "seeds.sql": "53ed96976a5c7f097f21d71e7f50013bcc684c5f91d278e43621572c14b06976",
+    "skills.csv": "43a99b905ad2ef57dc49ebec22703b5d3ce87074b38da05f2c8f1cb47d3be77a",
+    "training.csv": "dfc73f3d7a718b48af0415391947d19d0cf8f4a1f372f3b2bb6f89bacfacbcc7"
+  }
 }

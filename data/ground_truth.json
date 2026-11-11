@@ -18,20 +18,13 @@
     "entity_id": "ALLOC-2026-000049",
     "expected_flag": "ALLOCATION_EXCEEDS_CAPACITY",
     "edge_case_label": "EC-1",
-    "detail": "allocation_hours=34.0 > contracted_capacity=14.0 for emp=EMP-000003"
+    "detail": "allocation_percentage=150% (38.0h) > contracted_capacity=18.0h for emp=EMP-000001"
   },
   {
     "issue_type": "OVERLAPPING_ALLOCATION",
     "entity_id": "ALLOC-2026-000050",
     "expected_flag": "DATE_OVERLAP_CONFLICT",
     "edge_case_label": "EC-4",
-    "detail": "Employee EMP-000004 has overlapping allocations 2026-03-01\u21922026-04-30 on project PRJ-2026-000001"
-  },
-  {
-    "issue_type": "OVERLAPPING_ALLOCATION",
-    "entity_id": "ALLOC-2026-000051",
-    "expected_flag": "DATE_OVERLAP_CONFLICT",
-    "edge_case_label": "EC-4",
-    "detail": "Employee EMP-000004 has overlapping allocations 2026-03-01\u21922026-04-30 on project PRJ-2026-000002"
+    "detail": "Employee EMP-000003 has overlapping allocations 2026-03-01\u21922026-04-30 on project PRJ-2026-000002"
   }
 ]

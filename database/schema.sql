@@ -15,6 +15,7 @@ USE workforce_intelligence;
 SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS historical_event_log;
+DROP TABLE IF EXISTS leave_event;
 DROP TABLE IF EXISTS gap_analysis;
 DROP TABLE IF EXISTS training;
 DROP TABLE IF EXISTS availability;
@@ -381,6 +382,41 @@ CREATE TABLE availability (
 CREATE INDEX idx_avl_emp_period ON availability(employee_id, start_date, end_date);
 CREATE INDEX idx_avl_type_status ON availability(availability_type, status, is_current);
 CREATE INDEX idx_avl_percentage ON availability(availability_percentage);
+
+
+-- ==============================================================================
+-- SUPPORTING TABLE: leave_event
+-- Independent tracking of employee leave requests and approvals.
+-- Deterministic ID Format: LEV-XXXXX (e.g., LEV-00001, LEV-00250)
+-- ==============================================================================
+CREATE TABLE leave_event (
+    leave_id                 VARCHAR(16)   NOT NULL,
+    employee_id              VARCHAR(20)   NOT NULL,
+    leave_type               ENUM('ANNUAL', 'SICK', 'PARENTAL', 'UNPAID', 'BEREAVEMENT') NOT NULL DEFAULT 'ANNUAL',
+    start_date               DATE          NOT NULL,
+    end_date                 DATE          NOT NULL,
+    leave_hours              DECIMAL(5,2)  NOT NULL DEFAULT 8.00,
+    approval_status          ENUM('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED') NOT NULL DEFAULT 'PENDING',
+    approver_id              VARCHAR(20)   NULL,
+    reason                   VARCHAR(255)  NULL,
+    created_at               TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at               TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    -- Constraints
+    CONSTRAINT pk_leave_event PRIMARY KEY (leave_id),
+    CONSTRAINT chk_leave_id_format CHECK (leave_id REGEXP '^LEV-[0-9]{5}$'),
+    CONSTRAINT chk_leave_dates CHECK (end_date >= start_date),
+    CONSTRAINT chk_leave_hours CHECK (leave_hours >= 0.00),
+
+    -- Foreign Keys
+    CONSTRAINT fk_lev_employee FOREIGN KEY (employee_id) 
+        REFERENCES employee(employee_id) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_lev_approver FOREIGN KEY (approver_id) 
+        REFERENCES employee(employee_id) ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB COMMENT='Independent tracking of employee leave events and approval status';
+
+CREATE INDEX idx_lev_emp_dates ON leave_event(employee_id, start_date, end_date);
+CREATE INDEX idx_lev_status ON leave_event(approval_status);
 
 
 -- ==============================================================================

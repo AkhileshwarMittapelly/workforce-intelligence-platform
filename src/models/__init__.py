@@ -11,6 +11,8 @@ from src.models.entities import (
     Availability,
     Training,
     GapAnalysis,
+    LeaveEvent,
+    HistoricalEventLog,
 )
 
 __all__ = [
@@ -25,4 +27,6 @@ __all__ = [
     "Availability",
     "Training",
     "GapAnalysis",
+    "LeaveEvent",
+    "HistoricalEventLog",
 ]

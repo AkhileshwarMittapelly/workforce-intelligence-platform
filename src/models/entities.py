@@ -16,6 +16,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    JSON,
     Numeric,
     SmallInteger,
     String,
@@ -314,6 +315,9 @@ class Employee(Base):
     allocations: Mapped[List["Allocation"]] = relationship("Allocation", back_populates="employee")
     availabilities: Mapped[List["Availability"]] = relationship("Availability", back_populates="employee")
     trainings: Mapped[List["Training"]] = relationship("Training", back_populates="employee")
+    leave_events: Mapped[List["LeaveEvent"]] = relationship(
+        "LeaveEvent", foreign_keys="LeaveEvent.employee_id", back_populates="employee"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -715,3 +719,69 @@ class GapAnalysis(Base):
     project: Mapped[Optional["Project"]] = relationship("Project", back_populates="gap_analyses")
     role: Mapped[Optional["Role"]] = relationship("Role", back_populates="gap_analyses")
     skill: Mapped["Skill"] = relationship("Skill", back_populates="gap_analyses")
+
+
+# ---------------------------------------------------------------------------
+# 11. LeaveEvent (Supporting Entity)
+# ---------------------------------------------------------------------------
+
+class LeaveEvent(Base):
+    __tablename__ = "leave_event"
+
+    leave_id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    employee_id: Mapped[str] = mapped_column(
+        String(20), ForeignKey("employee.employee_id", onupdate="CASCADE", ondelete="RESTRICT"), nullable=False
+    )
+    leave_type: Mapped[str] = mapped_column(
+        Enum("ANNUAL", "SICK", "PARENTAL", "UNPAID", "BEREAVEMENT"), nullable=False, default="ANNUAL"
+    )
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    leave_hours: Mapped[Decimal] = mapped_column(Numeric(5, 2), nullable=False, default=Decimal("8.00"))
+    approval_status: Mapped[str] = mapped_column(
+        Enum("PENDING", "APPROVED", "REJECTED", "CANCELLED"), nullable=False, default="PENDING"
+    )
+    approver_id: Mapped[Optional[str]] = mapped_column(
+        String(20), ForeignKey("employee.employee_id", onupdate="CASCADE", ondelete="SET NULL"), nullable=True
+    )
+    reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
+
+    # Relationships
+    employee: Mapped["Employee"] = relationship(
+        "Employee", foreign_keys=[employee_id], back_populates="leave_events"
+    )
+    approver: Mapped[Optional["Employee"]] = relationship(
+        "Employee", foreign_keys=[approver_id]
+    )
+
+
+# ---------------------------------------------------------------------------
+# 12. HistoricalEventLog (Supporting Entity - Immutable Audit Trail)
+# ---------------------------------------------------------------------------
+
+class HistoricalEventLog(Base):
+    __tablename__ = "historical_event_log"
+
+    event_id: Mapped[str] = mapped_column(String(24), primary_key=True)
+    entity_type: Mapped[str] = mapped_column(
+        Enum("EMPLOYEE", "ROLE", "SKILL", "EMPLOYEE_SKILL", "PROJECT", "DEMAND_PLAN", "ALLOCATION", "AVAILABILITY", "TRAINING", "GAP_ANALYSIS", "LEAVE_EVENT"),
+        nullable=False,
+    )
+    entity_id: Mapped[str] = mapped_column(String(60), nullable=False)
+    event_type: Mapped[str] = mapped_column(
+        Enum("CREATED", "STATUS_CHANGE", "ALLOCATED", "DEALLOCATED", "SKILL_UPGRADE", "CAPACITY_CHANGE", "DEMAND_CHANGE", "GAP_IDENTIFIED", "TRAINING_ENROLLED", "TRAINING_COMPLETED", "RECORD_SUPERSEDED", "LEAVE_REQUESTED", "LEAVE_APPROVED", "LEAVE_REJECTED"),
+        nullable=False,
+    )
+    old_state: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    new_state: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    performed_by: Mapped[str] = mapped_column(String(100), nullable=False, default="SYSTEM")
+    event_timestamp: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.current_timestamp()
+    )
