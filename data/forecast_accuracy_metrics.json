@@ -1,13 +1,20 @@
 {
   "status": "EVALUATED",
   "target_variable": "Demanded Project Labor FTE vs Committed Allocation FTE",
-  "sample_size": 20,
-  "mae": 3.573,
-  "rmse": 3.8714,
-  "wape_pct": 228.67,
-  "forecast_bias_pct": 224.26,
-  "mean_actual_fte": 1.5625,
-  "mean_forecast_fte": 5.0665,
+  "sample_size": 500,
+  "mae": 58.6052,
+  "rmse": 68.3967,
+  "wape_pct": 982.32,
+  "forecast_bias_pct": 978.97,
+  "mean_actual_fte": 5.966,
+  "mean_forecast_fte": 64.3712,
+  "naive_baseline": {
+    "model": "Mean Historical Allocation Predictor",
+    "mae": 0.701,
+    "rmse": 0.8919,
+    "wape_pct": 11.75
+  },
+  "semantics_note": "Positive bias reflects forward-looking project demand pipeline exceeding current committed staffing allocations across the 2026 delivery horizon.",
   "assumptions": "Holdout empirical evaluation comparing forward project staffing requirements against verified employee allocations across 2026 delivery horizon",
-  "timestamp": "2026-11-11T16:50:19.299329"
+  "timestamp": "2026-11-11T17:15:06.869338"
 }

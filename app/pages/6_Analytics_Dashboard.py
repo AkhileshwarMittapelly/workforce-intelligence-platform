@@ -81,6 +81,8 @@ with col1:
         )
         fig_donut.update_layout(height=320, margin=dict(l=10, r=10, t=10, b=10))
         st.plotly_chart(fig_donut, use_container_width=True)
+    else:
+        st.info("No gap analysis recommendations are available yet. Run a data generation cycle to populate gap analysis records.")
 
 with col2:
     st.subheader("Departmental Talent Distribution")

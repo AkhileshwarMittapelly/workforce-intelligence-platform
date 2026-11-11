@@ -1,6 +1,6 @@
 {
   "status": "PASSED",
-  "timestamp": "2026-11-11T16:50:14.773978",
+  "timestamp": "2026-11-11T17:19:05.493243",
   "total_checks": 13,
   "error_count": 0,
   "warning_count": 0,
@@ -25,36 +25,36 @@
       "rule_name": "COMPOSITE_DUPLICATE_DEMAND",
       "severity": "INTENTIONAL_ANOMALY",
       "table_name": "demand_plan",
-      "entity_id": "DEM-PRJ-2026-000001-2026W23-99",
+      "entity_id": "DEM-PRJ-2026-000001-2026W24-99",
       "column_name": "composite_keys",
-      "error_message": "Intentional EC-3 duplicate demand plan on DEM-PRJ-2026-000001-2026W23-99",
-      "context_data": "{'project_id': 'PRJ-2026-000001', 'role_id': 'ROL-0004', 'required_skill_id': 'SKL-000030', 'start_date': '2026-06-01', 'end_date': '2026-06-07'}"
+      "error_message": "Intentional EC-3 duplicate demand plan on DEM-PRJ-2026-000001-2026W24-99",
+      "context_data": "{'project_id': 'PRJ-2026-000001', 'role_id': 'ROL-0006', 'required_skill_id': 'SKL-000199', 'start_date': '2026-06-08', 'end_date': '2026-06-14'}"
     },
     {
       "rule_name": "ALLOCATION_CAPACITY_RECONCILIATION",
       "severity": "INTENTIONAL_ANOMALY",
       "table_name": "allocation",
-      "entity_id": "ALLOC-2026-000049",
+      "entity_id": "ALLOC-2026-004749",
       "column_name": "allocation_percentage",
-      "error_message": "Intentional EC-1 over-allocation (150.0%) on ALLOC-2026-000049",
+      "error_message": "Intentional EC-1 over-allocation (150.0%) on ALLOC-2026-004749",
       "context_data": ""
     }
   ],
   "errors": [],
   "warnings": [],
   "table_row_counts": {
-    "role": 15,
-    "employee": 50,
-    "skill": 30,
-    "employee_skill": 232,
-    "project": 20,
-    "demand_plan": 84,
-    "leave_event": 97,
-    "allocation": 50,
-    "availability": 49,
-    "gap_analysis": 84,
-    "training": 50,
-    "historical_event_log": 529
+    "role": 30,
+    "employee": 5000,
+    "skill": 300,
+    "employee_skill": 23872,
+    "project": 500,
+    "demand_plan": 25786,
+    "leave_event": 9652,
+    "allocation": 4750,
+    "availability": 4836,
+    "gap_analysis": 25786,
+    "training": 5000,
+    "historical_event_log": 7140
   },
-  "dataset_checksum_sha256": "efae0a0813487033adebaeb528758f56236f7fbd22b1d6282020edf1c55d6629"
+  "dataset_checksum_sha256": "935c66276e016a87df4e126b8b093c5a9147f16524324e8daa6cab16ba209fa2"
 }

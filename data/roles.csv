@@ -14,3 +14,18 @@ ROL-0012,RC-SECURITY-ENGINEER-0012,Security Engineer,Security,SENIOR,126.31,Secu
 ROL-0013,RC-PRODUCT-MANAGER-0013,Product Manager,Product,SENIOR,130.49,Product Manager responsible for Product activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
 ROL-0014,RC-UX-DESIGNER-0014,UX Designer,Product,MID,114.84,UX Designer responsible for Product activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
 ROL-0015,RC-BUSINESS-ANALYST-0015,Business Analyst,Finance,JUNIOR,94.81,Business Analyst responsible for Finance activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0016,RC-PROJECT-MANAGER-0016,Project Manager,Engineering,SENIOR,137.54,Project Manager responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0017,RC-SCRUM-MASTER-0017,Scrum Master,Engineering,MID,107.81,Scrum Master responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0018,RC-SOLUTIONS-ARCHITECT-0018,Solutions Architect,Engineering,PRINCIPAL,193.58,Solutions Architect responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0019,RC-QA-ENGINEER-0019,QA Engineer,Engineering,MID,101.81,QA Engineer responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0020,RC-FRONTEND-DEVELOPER-0020,Frontend Developer,Engineering,JUNIOR,77.72,Frontend Developer responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0021,RC-BACKEND-DEVELOPER-0021,Backend Developer,Engineering,MID,100.19,Backend Developer responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0022,RC-FULL-STACK-DEVELOPER-0022,Full Stack Developer,Engineering,MID,117.35,Full Stack Developer responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0023,RC-DATABASE-ADMINISTRAT-0023,Database Administrator,Engineering,SENIOR,140.4,Database Administrator responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0024,RC-SITE-RELIABILITY-ENG-0024,Site Reliability Engineer,Cloud Operations,SENIOR,137.03,Site Reliability Engineer responsible for Cloud Operations activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0025,RC-AI-RESEARCH-SCIENTIS-0025,AI Research Scientist,Data & AI,PRINCIPAL,181.16,AI Research Scientist responsible for Data & AI activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0026,RC-CYBERSECURITY-CONSUL-0026,Cybersecurity Consultant,Security,SENIOR,138.61,Cybersecurity Consultant responsible for Security activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0027,RC-COMPLIANCE-OFFICER-0027,Compliance Officer,Legal,LEAD,154.03,Compliance Officer responsible for Legal activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0028,RC-HR-BUSINESS-PARTNER-0028,HR Business Partner,HR,MID,108.83,HR Business Partner responsible for HR activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0029,RC-FINANCE-ANALYST-0029,Finance Analyst,Finance,JUNIOR,89.16,Finance Analyst responsible for Finance activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0030,RC-MARKETING-MANAGER-0030,Marketing Manager,Marketing,SENIOR,138.43,Marketing Manager responsible for Marketing activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00

@@ -237,6 +237,18 @@ def reconcile_weekly_capacities_df(
     p_start = period_start if period_start else "2026-06-01"
     p_end = period_end if period_end else "2026-06-07"
 
+    # Pre-filter allocations and leave to the target period for high performance
+    p_s_ts = pd.to_datetime(p_start)
+    p_e_ts = pd.to_datetime(p_end)
+    if not alloc_df.empty and "start_date" in alloc_df.columns and "end_date" in alloc_df.columns:
+        a_s = pd.to_datetime(alloc_df["start_date"], errors="coerce")
+        a_e = pd.to_datetime(alloc_df["end_date"], errors="coerce")
+        alloc_df = alloc_df[(a_s <= p_e_ts) & (a_e >= p_s_ts)].copy()
+    if not leave_df.empty and "start_date" in leave_df.columns and "end_date" in leave_df.columns:
+        l_s = pd.to_datetime(leave_df["start_date"], errors="coerce")
+        l_e = pd.to_datetime(leave_df["end_date"], errors="coerce")
+        leave_df = leave_df[(l_s <= p_e_ts) & (l_e >= p_s_ts)].copy()
+
     records = []
     active_emps = emp_df[emp_df["status"].astype(str).str.upper() == "ACTIVE"] if "status" in emp_df.columns else emp_df
     for _, emp in active_emps.iterrows():

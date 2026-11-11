@@ -1,6 +1,6 @@
 {
   "status": "PASSED",
-  "timestamp": "2026-11-11T16:50:14.773978",
+  "timestamp": "2026-11-11T17:19:05.493243",
   "error_count": 0,
   "warning_count": 0,
   "intentional_anomaly_count": 2,
@@ -20,8 +20,8 @@
     "ground_truth_references": "PASS"
   },
   "intentional_anomaly_flags": [
-    "[COMPOSITE_DUPLICATE_DEMAND] on DEM-PRJ-2026-000001-2026W23-99: Intentional EC-3 duplicate demand plan on DEM-PRJ-2026-000001-2026W23-99",
-    "[ALLOCATION_CAPACITY_RECONCILIATION] on ALLOC-2026-000049: Intentional EC-1 over-allocation (150.0%) on ALLOC-2026-000049"
+    "[COMPOSITE_DUPLICATE_DEMAND] on DEM-PRJ-2026-000001-2026W24-99: Intentional EC-3 duplicate demand plan on DEM-PRJ-2026-000001-2026W24-99",
+    "[ALLOCATION_CAPACITY_RECONCILIATION] on ALLOC-2026-004749: Intentional EC-1 over-allocation (150.0%) on ALLOC-2026-004749"
   ],
-  "dataset_checksum_sha256": "efae0a0813487033adebaeb528758f56236f7fbd22b1d6282020edf1c55d6629"
+  "dataset_checksum_sha256": "935c66276e016a87df4e126b8b093c5a9147f16524324e8daa6cab16ba209fa2"
 }

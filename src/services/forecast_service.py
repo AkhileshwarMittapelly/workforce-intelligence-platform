@@ -700,6 +700,7 @@ def forecast_comparison(
 
 def evaluate_forecast_accuracy(
     data_dir: Optional[Path | str] = None,
+    deduplicate_demand: bool = True,
 ) -> dict:
     """
     Phase 7: Separate demand anomaly metrics from forecast accuracy metrics.
@@ -708,6 +709,7 @@ def evaluate_forecast_accuracy(
     - RMSE: Root Mean Squared Error
     - WAPE: Weighted Absolute Percentage Error (sum(|A - F|) / sum(A))
     - Forecast Bias: sum(F - A) / sum(A)
+    - Naive baseline comparisons (Mean predictor baseline).
     """
     d_dir = Path(data_dir) if data_dir else DATA_DIR
     demand_df = _load_csv("demand_plans.csv") if not data_dir else pd.read_csv(Path(data_dir) / "demand_plans.csv")
@@ -727,6 +729,13 @@ def evaluate_forecast_accuracy(
     d_clean.columns = [c.strip().lower() for c in d_clean.columns]
     a_clean = allocations_df.copy()
     a_clean.columns = [c.strip().lower() for c in a_clean.columns]
+
+    # De-duplicate demand if requested
+    if deduplicate_demand:
+        s_col = "required_skill_id" if "required_skill_id" in d_clean.columns else "skill_id"
+        dup_keys = [k for k in ["project_id", "role_id", s_col, "start_date", "end_date"] if k in d_clean.columns]
+        if len(dup_keys) >= 4:
+            d_clean = d_clean.drop_duplicates(subset=dup_keys, keep="first")
 
     # Map allocations to project / role / week commitments
     fte_col = "required_fte" if "required_fte" in d_clean.columns else "demand_fte"
@@ -774,6 +783,13 @@ def evaluate_forecast_accuracy(
     wape = float((np.sum(np.abs(diff)) / sum_act) * 100.0) if sum_act > 0 else 0.0
     bias = float((np.sum(diff) / sum_act) * 100.0) if sum_act > 0 else 0.0
 
+    # Naive baseline: predicting mean actual allocated FTE
+    mean_act = float(np.mean(act))
+    naive_diff = mean_act - act
+    naive_mae = float(np.mean(np.abs(naive_diff)))
+    naive_rmse = float(np.sqrt(np.mean(naive_diff ** 2)))
+    naive_wape = float((np.sum(np.abs(naive_diff)) / sum_act) * 100.0) if sum_act > 0 else 0.0
+
     eval_result = {
         "status": "EVALUATED",
         "target_variable": "Demanded Project Labor FTE vs Committed Allocation FTE",
@@ -782,8 +798,15 @@ def evaluate_forecast_accuracy(
         "rmse": round(rmse, 4),
         "wape_pct": round(wape, 2),
         "forecast_bias_pct": round(bias, 2),
-        "mean_actual_fte": round(float(np.mean(act)), 4),
+        "mean_actual_fte": round(mean_act, 4),
         "mean_forecast_fte": round(float(np.mean(fcst)), 4),
+        "naive_baseline": {
+            "model": "Mean Historical Allocation Predictor",
+            "mae": round(naive_mae, 4),
+            "rmse": round(naive_rmse, 4),
+            "wape_pct": round(naive_wape, 2),
+        },
+        "semantics_note": "Positive bias reflects forward-looking project demand pipeline exceeding current committed staffing allocations across the 2026 delivery horizon.",
         "assumptions": "Holdout empirical evaluation comparing forward project staffing requirements against verified employee allocations across 2026 delivery horizon",
         "timestamp": datetime.now().isoformat(),
     }

@@ -226,8 +226,9 @@ def _compute_gap_recommendations(
     else:
         skill_lookup = pd.DataFrame(columns=["employee_id", "skill_id", "proficiency_level"])
 
-    # --- 3. Clean allocations with dates ---
+    # --- 3. Clean allocations with dates and pre-index by employee ---
     alloc_clean = allocations_df.copy() if not allocations_df.empty else pd.DataFrame()
+    alloc_by_emp: dict[str, list[tuple[pd.Timestamp, pd.Timestamp, float]]] = {}
     if not alloc_clean.empty:
         alloc_clean["_s"] = pd.to_datetime(alloc_clean.get("start_date"), errors="coerce")
         alloc_clean["_e"] = pd.to_datetime(alloc_clean.get("end_date"), errors="coerce")
@@ -238,8 +239,17 @@ def _compute_gap_recommendations(
         else:
             alloc_clean["_fte"] = 0.5
 
-    # --- 4. Clean approved leave with dates ---
+        if "employee_id" in alloc_clean.columns:
+            for eid, grp in alloc_clean.groupby("employee_id"):
+                alloc_by_emp[str(eid)] = [
+                    (r["_s"], r["_e"], float(r["_fte"]))
+                    for _, r in grp.iterrows()
+                    if pd.notna(r["_s"]) and pd.notna(r["_e"])
+                ]
+
+    # --- 4. Clean approved leave with dates and pre-index by employee ---
     leave_clean = pd.DataFrame()
+    leave_by_emp: dict[str, list[tuple[pd.Timestamp, pd.Timestamp, float]]] = {}
     if not leave_events_df.empty:
         app_col = "approval_status" if "approval_status" in leave_events_df.columns else None
         if app_col:
@@ -250,6 +260,24 @@ def _compute_gap_recommendations(
             leave_clean["_s"] = pd.to_datetime(leave_clean.get("start_date"), errors="coerce")
             leave_clean["_e"] = pd.to_datetime(leave_clean.get("end_date"), errors="coerce")
             leave_clean["_fte"] = (leave_clean.get("leave_hours", 0.0).astype(float) / 40.0).clip(upper=1.0)
+            if "employee_id" in leave_clean.columns:
+                for eid, grp in leave_clean.groupby("employee_id"):
+                    leave_by_emp[str(eid)] = [
+                        (r["_s"], r["_e"], float(r["_fte"]))
+                        for _, r in grp.iterrows()
+                        if pd.notna(r["_s"]) and pd.notna(r["_e"])
+                    ]
+
+    # --- 5. Pre-index skills by skill_id ---
+    skills_by_id: dict[str, list[tuple[str, int]]] = {}
+    if not skill_lookup.empty:
+        active_ids = set(active_emp["employee_id"].tolist()) if not active_emp.empty else set()
+        for sid, grp in skill_lookup.groupby("skill_id"):
+            skills_by_id[str(sid)] = [
+                (str(r["employee_id"]), int(r["proficiency_level"]))
+                for _, r in grp.iterrows()
+                if str(r["employee_id"]) in active_ids
+            ]
 
     # --- 5. Critical priority projects ---
     critical_project_ids: set = set()
@@ -298,16 +326,12 @@ def _compute_gap_recommendations(
         pe_ts = pd.to_datetime(row.get("period_end"))
 
         # Qualified active employees
-        if not skill_lookup.empty:
-            qualified_es = skill_lookup[
-                (skill_lookup["skill_id"] == skill_id)
-                & (skill_lookup["proficiency_level"].fillna(1) >= req_prof)
-            ]
-            active_ids = set(active_emp["employee_id"].tolist()) if not active_emp.empty else set()
-            qualified_emp_ids = set(qualified_es["employee_id"]).intersection(active_ids)
-            avg_prof = float(qualified_es["proficiency_level"].mean()) if not qualified_es.empty else 0.0
+        candidates = skills_by_id.get(skill_id, [])
+        matching_candidates = [(eid, prof) for eid, prof in candidates if prof >= req_prof]
+        qualified_emp_ids = [eid for eid, _ in matching_candidates]
+        if matching_candidates:
+            avg_prof = sum(p for _, p in matching_candidates) / len(matching_candidates)
         else:
-            qualified_emp_ids = set()
             avg_prof = 0.0
 
         proficiency_gap = max(0.0, req_prof - avg_prof)
@@ -318,27 +342,19 @@ def _compute_gap_recommendations(
 
         for emp_id in qualified_emp_ids:
             contracted = emp_contracted_map.get(emp_id, 1.0)
-            # Overlapping allocations
-            if not alloc_clean.empty and pd.notna(ps_ts) and pd.notna(pe_ts):
-                emp_allocs = alloc_clean[
-                    (alloc_clean["employee_id"] == emp_id)
-                    & (alloc_clean["_s"] <= pe_ts)
-                    & (alloc_clean["_e"] >= ps_ts)
-                ]
-                committed_fte = float(emp_allocs["_fte"].sum())
-            else:
-                committed_fte = 0.0
+            # Overlapping allocations from pre-indexed dictionary
+            committed_fte = 0.0
+            if emp_id in alloc_by_emp and pd.notna(ps_ts) and pd.notna(pe_ts):
+                for s, e, fval in alloc_by_emp[emp_id]:
+                    if s <= pe_ts and e >= ps_ts:
+                        committed_fte += fval
 
-            # Overlapping leave
-            if not leave_clean.empty and pd.notna(ps_ts) and pd.notna(pe_ts):
-                emp_leaves = leave_clean[
-                    (leave_clean["employee_id"] == emp_id)
-                    & (leave_clean["_s"] <= pe_ts)
-                    & (leave_clean["_e"] >= ps_ts)
-                ]
-                leave_fte = float(emp_leaves["_fte"].sum())
-            else:
-                leave_fte = 0.0
+            # Overlapping leave from pre-indexed dictionary
+            leave_fte = 0.0
+            if emp_id in leave_by_emp and pd.notna(ps_ts) and pd.notna(pe_ts):
+                for s, e, fval in leave_by_emp[emp_id]:
+                    if s <= pe_ts and e >= ps_ts:
+                        leave_fte += fval
 
             net_avail = max(0.0, contracted - committed_fte - leave_fte)
             cap_key = (emp_id, ps_ts, pe_ts)
