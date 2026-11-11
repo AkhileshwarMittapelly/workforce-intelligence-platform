@@ -1,0 +1,22 @@
+# Core Application & Framework
+streamlit>=1.32.0
+pydantic>=2.6.4
+pydantic-settings>=2.2.1
+python-dotenv>=1.0.1
+
+# Database Connectivity & ORM
+PyMySQL>=1.1.0
+cryptography>=42.0.0
+SQLAlchemy>=2.0.28
+
+# Data Processing & Analytics
+pandas>=2.2.0
+numpy>=1.26.0
+
+# Visualization
+plotly>=5.20.0
+
+# Testing & Code Quality
+pytest>=8.1.1
+pytest-cov>=4.1.0
+ruff>=0.3.0
