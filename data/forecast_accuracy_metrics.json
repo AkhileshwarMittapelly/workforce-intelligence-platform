@@ -1,0 +1,13 @@
+{
+  "status": "EVALUATED",
+  "target_variable": "Demanded Project Labor FTE vs Committed Allocation FTE",
+  "sample_size": 20,
+  "mae": 3.573,
+  "rmse": 3.8714,
+  "wape_pct": 228.67,
+  "forecast_bias_pct": 224.26,
+  "mean_actual_fte": 1.5625,
+  "mean_forecast_fte": 5.0665,
+  "assumptions": "Holdout empirical evaluation comparing forward project staffing requirements against verified employee allocations across 2026 delivery horizon",
+  "timestamp": "2026-11-11T16:31:20.385501"
+}

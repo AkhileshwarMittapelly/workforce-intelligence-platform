@@ -130,6 +130,26 @@ with tab_mgr:
                 st.dataframe(dept_leaves[["leave_id", "employee_id", "leave_type", "start_date", "end_date", "leave_hours", "approval_status", "reason"]], use_container_width=True, hide_index=True)
             else:
                 st.info("No active leave requests for team members.")
+        else:
+            st.info("No leave records found.")
+
+        st.markdown("#### ⚖️ Team Weekly Capacity Reconciliation & Over-Allocation Check")
+        try:
+            from src.services.capacity_service import reconcile_weekly_capacities_df
+            team_recon = reconcile_weekly_capacities_df()
+            if not team_recon.empty:
+                dept_recon = team_recon[team_recon["department"] == sel_dept]
+                if not dept_recon.empty:
+                    over = dept_recon[dept_recon["capacity_status"] == "OVER_ALLOCATED"]
+                    if not over.empty:
+                        st.error(f"🚨 **Over-Allocation Detected**: {len(over)} team member(s) have negative remaining capacity!")
+                        st.dataframe(over[["employee_id", "employee_name", "fte", "contracted_hours", "approved_leave_hours", "allocated_hours", "remaining_capacity_hours", "over_allocation_percentage", "capacity_status"]], use_container_width=True, hide_index=True)
+                    else:
+                        st.success("✓ All department team members within contracted capacity limits.")
+                    with st.expander("Show Detailed Team Reconciliation Table", expanded=False):
+                        st.dataframe(dept_recon, use_container_width=True, hide_index=True)
+        except Exception as exc:
+            st.info(f"Team reconciliation preview unavailable: {exc}")
 
 # -----------------------------------------------------------------------------
 # TAB 3: HR PARTNER
@@ -236,6 +256,35 @@ with tab_admin:
         st.dataframe(pd.DataFrame(gt_data), use_container_width=True, hide_index=True)
     else:
         st.info("Ground truth file not available.")
+
+    st.markdown("---")
+    st.markdown("### 🛡️ Comprehensive Data Validation Report & System Integrity")
+    val_rep_file = _PROJECT_ROOT / "data" / "validation_report.json"
+    if val_rep_file.exists():
+        with open(val_rep_file, "r", encoding="utf-8") as f:
+            v_report = json.load(f)
+        vc1, vc2, vc3, vc4 = st.columns(4)
+        vc1.metric("Validation Status", v_report.get("status", "PASSED"))
+        vc2.metric("Total Rules Checked", v_report.get("total_checks", 13))
+        vc3.metric("Data Corruptions / Errors", v_report.get("error_count", 0))
+        vc4.metric("Intentional Anomalies", v_report.get("intentional_anomaly_count", 2))
+
+        with st.expander("Show Detailed 13-Point Check Rules Breakdown", expanded=False):
+            st.json(v_report.get("checks_summary", {}))
+    else:
+        st.info("Validation report file not yet generated.")
+
+    st.markdown("---")
+    st.markdown("### 📑 Demand Duplication Exceptions & Planning Quarantine Log")
+    dup_exc_file = _PROJECT_ROOT / "data" / "demand_duplicate_exceptions.csv"
+    if dup_exc_file.exists():
+        dup_df = pd.read_csv(dup_exc_file)
+        if not dup_df.empty:
+            st.dataframe(dup_df, use_container_width=True, hide_index=True)
+        else:
+            st.success("✓ No composite duplicate demand records detected.")
+    else:
+        st.info("No demand duplicate exceptions detected.")
 
     st.markdown("---")
     st.markdown("### 📜 Immutable Historical Event Log & Audit Trail")

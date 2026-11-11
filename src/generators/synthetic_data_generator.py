@@ -673,6 +673,7 @@ class SyntheticDataGenerator:
         rows = []
         seq = 1
         seen_demand_ids: set[str] = set()
+        seen_composite_demand_keys: set[tuple] = set()
         # 2026 has 53 ISO weeks (2026-01-01 to 2026-12-31 is Thursday to Thursday)
         iso_weeks = list(range(1, 54))
 
@@ -710,6 +711,13 @@ class SyntheticDataGenerator:
 
                 start_date = week_monday(YEAR, week)
                 end_date = week_sunday(YEAR, week)
+                comp_key = (prj_id, role_id, skill_id, iso(start_date), iso(end_date))
+                attempt = 0
+                while comp_key in seen_composite_demand_keys and attempt < 20:
+                    skill_id = skill_ids[int(self.rng.integers(0, len(skill_ids)))]
+                    comp_key = (prj_id, role_id, skill_id, iso(start_date), iso(end_date))
+                    attempt += 1
+                seen_composite_demand_keys.add(comp_key)
 
                 rows.append(
                     {
@@ -1348,13 +1356,20 @@ class SyntheticDataGenerator:
                 "Role master catalog initialization", "SYSTEM", f"{r['created_at']}"
             )
 
-        # Employee creation events
-        for _, r in self.employees_df.iterrows():
+        # Employee creation and role change events
+        for idx, r in self.employees_df.iterrows():
             add_event(
                 "EMPLOYEE", r["employee_id"], "CREATED",
                 None, {"name": f"{r['first_name']} {r['last_name']}", "role_id": r["current_role_id"], "status": r["status"]},
                 "Initial employee profile creation", "HR_ADMIN", f"{r['hire_date']}T09:00:00"
             )
+            if idx % 5 == 0:  # Sample of employees with role promotions/transfers
+                old_role = f"ROL-{(idx % 15) + 1:04d}"
+                add_event(
+                    "EMPLOYEE", r["employee_id"], "ROLE_CHANGE",
+                    {"role_id": old_role}, {"role_id": r["current_role_id"]},
+                    "Annual performance promotion / lateral transfer", "HR_DIRECTOR", f"2026-06-15T10:00:00"
+                )
 
         # EmployeeSkill verification events
         for _, r in self.employee_skills_df.head(min(100, len(self.employee_skills_df))).iterrows():
@@ -1365,19 +1380,25 @@ class SyntheticDataGenerator:
             )
             if r["verification_status"] in ("MANAGER_VERIFIED", "CERTIFIED"):
                 add_event(
-                    "EMPLOYEE_SKILL", r["employee_skill_id"], "SKILL_UPGRADE",
-                    {"proficiency": max(1, r["proficiency_level"] - 1)},
-                    {"proficiency": r["proficiency_level"], "status": "VERIFIED"},
-                    "Manager competency evaluation", "MANAGER", f"{r['last_evaluated_date']}T14:00:00"
+                    "EMPLOYEE_SKILL", r["employee_skill_id"], "SKILL_VERIFICATION",
+                    {"verification_status": "SELF_REPORTED", "proficiency": max(1, r["proficiency_level"] - 1)},
+                    {"verification_status": r["verification_status"], "proficiency": r["proficiency_level"]},
+                    "Manager competency evaluation & certification", "LEAD_ARCHITECT", f"{r['last_evaluated_date']}T14:00:00"
                 )
 
-        # Project creation events
-        for _, r in self.projects_df.iterrows():
+        # Project creation & status transition events
+        for idx, r in self.projects_df.iterrows():
             add_event(
                 "PROJECT", r["project_id"], "CREATED",
-                None, {"project_name": r["project_name"], "priority": r["priority"], "status": r["status"]},
+                None, {"project_name": r["project_name"], "priority": r["priority"], "status": "PLANNING"},
                 "Project charter approval", "PMO", f"{r['created_at']}"
             )
+            if r["status"] == "ACTIVE":
+                add_event(
+                    "PROJECT", r["project_id"], "STATUS_TRANSITION",
+                    {"status": "PLANNING"}, {"status": "ACTIVE"},
+                    "Project kickoff milestone approved and delivery authorized", "PMO_DIRECTOR", f"{r['start_date']}T09:00:00"
+                )
 
         # DemandPlan events
         for _, r in self.demand_plans_df.head(min(50, len(self.demand_plans_df))).iterrows():
@@ -1387,13 +1408,19 @@ class SyntheticDataGenerator:
                 "Project labor forecast submitted", "PROJECT_MANAGER", f"{r['created_at']}"
             )
 
-        # Allocation events
-        for _, r in self.allocations_df.head(min(50, len(self.allocations_df))).iterrows():
+        # Allocation confirmation and release events
+        for idx, r in self.allocations_df.head(min(50, len(self.allocations_df))).iterrows():
             add_event(
-                "ALLOCATION", r["allocation_id"], "ALLOCATED",
-                None, {"employee_id": r["employee_id"], "project_id": r["project_id"], "pct": r["allocation_percentage"]},
-                "Project staffing commitment", "RESOURCE_MGR", f"{r['created_at']}"
+                "ALLOCATION", r["allocation_id"], "ALLOCATION_CONFIRMED",
+                {"status": "PROPOSED"}, {"status": r["allocation_status"], "allocation_pct": r["allocation_percentage"]},
+                "Project staffing commitment confirmed", "RESOURCE_MGR", f"{r['created_at']}"
             )
+            if idx % 7 == 0:
+                add_event(
+                    "ALLOCATION", r["allocation_id"], "ALLOCATION_RELEASED",
+                    {"status": r["allocation_status"]}, {"status": "RELEASED"},
+                    "Project phase completed; staff released back to bench", "PROJECT_MANAGER", f"{r['end_date']}T17:00:00"
+                )
 
         # Leave events
         if self.leave_events_df is not None and not self.leave_events_df.empty:
@@ -1410,7 +1437,7 @@ class SyntheticDataGenerator:
                         "Manager authorization", "MANAGER", f"{r['created_at']}"
                     )
 
-        # GapAnalysis events
+        # GapAnalysis recommendation and mitigation decision events
         for _, r in self.gap_analysis_df.head(min(50, len(self.gap_analysis_df))).iterrows():
             if r["gap_severity"] in ("CRITICAL", "HIGH", "MEDIUM"):
                 add_event(
@@ -1418,14 +1445,28 @@ class SyntheticDataGenerator:
                     None, {"shortage": r["shortage_headcount"], "action": r["recommended_action"], "severity": r["gap_severity"]},
                     "Capability shortfall diagnosed", "AI_PLANNER", f"{r['created_at']}"
                 )
+                add_event(
+                    "GAP_ANALYSIS", r["gap_analysis_id"], "RECOMMENDATION_DECISION",
+                    {"decision_status": "PROPOSED"},
+                    {"decision_status": "APPROVED", "action": r["recommended_action"]},
+                    "Workforce planning committee authorization", "VP_ENGINEERING", f"{r['created_at']}"
+                )
 
-        # Training events
-        for _, r in self.training_df.head(min(50, len(self.training_df))).iterrows():
+        # Training progress and completion events
+        for idx, r in self.training_df.head(min(50, len(self.training_df))).iterrows():
             add_event(
                 "TRAINING", r["training_id"], "TRAINING_ENROLLED",
-                None, {"employee_id": r["employee_id"], "skill_id": r["skill_id"], "status": r["lifecycle_status"]},
+                None, {"employee_id": r["employee_id"], "skill_id": r["skill_id"], "status": "ENROLLED"},
                 "Targeted enablement enrollment", "HR_L_AND_D", f"{r['created_at']}"
             )
+            if r.get("lifecycle_status") == "COMPLETED" or idx % 3 == 0:
+                comp_dt = r.get("actual_completion_date", "2026-10-30")
+                add_event(
+                    "TRAINING", r["training_id"], "TRAINING_COMPLETED",
+                    {"lifecycle_status": "IN_PROGRESS"},
+                    {"lifecycle_status": "COMPLETED", "score": r.get("score", 95.0)},
+                    "Certification assessment passed; competency verified", "L_AND_D_DIRECTOR", f"{comp_dt}T16:00:00"
+                )
 
         return pd.DataFrame(rows)
 

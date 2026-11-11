@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -27,7 +27,7 @@ _SEVERITY_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "NONE": 4}
 
 @dataclass
 class GapRecommendation:
-    """Represents a single gap finding with an actionable recommendation."""
+    """Represents a single gap finding with an actionable recommendation and full explainability audit."""
 
     gap_analysis_id: str
     skill_id: str
@@ -40,6 +40,21 @@ class GapRecommendation:
     reasoning: str
     period_start: Optional[date]
     period_end: Optional[date]
+    # Phase 4 Explainability & Decision Audit fields
+    demand_quantity: float = 0.0
+    qualified_internal_supply: float = 0.0
+    available_bench_supply: float = 0.0
+    skill_proficiency_requirement: int = 1
+    current_verified_proficiency: float = 0.0
+    skill_freshness: str = "< 18 months (Verified Active)"
+    training_lead_time: str = "4 Weeks"
+    project_deadline: str = ""
+    capacity_shortage: float = 0.0
+    utilization_risk: str = "LOW"
+    chosen_recommendation: str = "NO_ACTION"
+    assumptions: str = "Active & verified proficiencies within 18 months; approved leave deducted"
+    decision_status: str = "PROPOSED"
+    created_at: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +373,10 @@ def _compute_gap_recommendations(
         ps_date = ps_ts.date() if pd.notna(ps_ts) else period_start
         pe_date = pe_ts.date() if pd.notna(pe_ts) else period_end
 
+        now_iso = datetime.now().isoformat()
+        training_weeks_str = f"{int((pe_ts - ps_ts).days / 7)} Weeks" if pd.notna(ps_ts) and pd.notna(pe_ts) else "4 Weeks"
+        deadline_str = str(pe_date) if pe_date else ""
+
         rec = GapRecommendation(
             gap_analysis_id=f"GAP-{uuid.uuid4().hex[:8].upper()}",
             skill_id=skill_id,
@@ -369,6 +388,20 @@ def _compute_gap_recommendations(
             reasoning=reasoning,
             period_start=ps_date if isinstance(ps_date, date) else None,
             period_end=pe_date if isinstance(pe_date, date) else None,
+            demand_quantity=round(demand_fte, 2),
+            qualified_internal_supply=round(float(len(qualified_emp_ids)), 2),
+            available_bench_supply=round(qualified_supply_fte, 2),
+            skill_proficiency_requirement=req_prof,
+            current_verified_proficiency=round(avg_prof, 2),
+            skill_freshness="< 18 months (Verified Active)",
+            training_lead_time=training_weeks_str,
+            project_deadline=deadline_str,
+            capacity_shortage=round(shortage, 2),
+            utilization_risk=severity,
+            chosen_recommendation=action,
+            assumptions=f"Proficiency >= {req_prof}; Active staff evaluated within 18 months; Approved leave deducted",
+            decision_status="PROPOSED",
+            created_at=now_iso,
         )
         recommendations.append(rec)
 

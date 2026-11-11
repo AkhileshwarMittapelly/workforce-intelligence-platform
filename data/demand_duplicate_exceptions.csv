@@ -1,0 +1,2 @@
+original_demand_id,duplicate_demand_id,duplicate_classification,original_fte,duplicate_fte,potential_double_counted_fte,project_id,role_id,skill_id,start_date,end_date,detection_timestamp,resolution_status
+DEM-PRJ-2026-000001-2026W23,DEM-PRJ-2026-000001-2026W23-99,INJECTED_ANOMALY_EC3,1.45,1.45,1.45,PRJ-2026-000001,ROL-0004,SKL-000030,2026-06-01,2026-06-07,2026-11-11T16:31:19.075308,FLAGGED_FOR_EXCLUSION

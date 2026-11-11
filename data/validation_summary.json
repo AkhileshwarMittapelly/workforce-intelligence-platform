@@ -1,25 +1,27 @@
 {
   "status": "PASSED",
-  "timestamp": "2026-11-11T15:52:57.549634",
-  "scale": "starter",
-  "seed": 20261022,
+  "timestamp": "2026-11-11T16:31:15.802359",
   "error_count": 0,
-  "errors": [],
+  "warning_count": 0,
+  "intentional_anomaly_count": 2,
   "checks_performed": {
     "primary_key_uniqueness": "PASS",
     "foreign_key_integrity": "PASS",
-    "enum_constraints": "PASS",
+    "required_fields": "PASS",
+    "allowed_enums": "PASS",
     "date_ordering": "PASS",
-    "project_demand_bounds": "PASS",
-    "demand_coverage_53_weeks": "PASS",
-    "gap_arithmetic_consistency": "PASS",
-    "edge_cases_labeled": "VERIFIED (4 anomalies labeled in ground_truth)"
+    "effective_date_consistency": "PASS",
+    "composite_duplicate_detection": "PASS",
+    "allocation_availability_reconciliation": "PASS",
+    "leave_capacity_reconciliation": "PASS",
+    "demand_project_date_consistency": "PASS",
+    "training_lifecycle_validity": "PASS",
+    "gap_analysis_arithmetic": "PASS",
+    "ground_truth_references": "PASS"
   },
   "intentional_anomaly_flags": [
-    "[EC-2] STALE_SKILL_ACTIVE on ESK-000001: STALE_PROFICIENCY",
-    "[EC-3] DEMAND_DOUBLE_COUNTED on DEM-PRJ-2026-000001-2026W23-99: DUPLICATE_DEMAND",
-    "[EC-1] OVER_ALLOCATED on ALLOC-2026-000049: ALLOCATION_EXCEEDS_CAPACITY",
-    "[EC-4] OVERLAPPING_ALLOCATION on ALLOC-2026-000050: DATE_OVERLAP_CONFLICT"
+    "[COMPOSITE_DUPLICATE_DEMAND] on DEM-PRJ-2026-000001-2026W23-99: Intentional EC-3 duplicate demand plan on DEM-PRJ-2026-000001-2026W23-99",
+    "[ALLOCATION_CAPACITY_RECONCILIATION] on ALLOC-2026-000049: Intentional EC-1 over-allocation (150.0%) on ALLOC-2026-000049"
   ],
-  "dataset_checksum_sha256": "5126d72ce3f89f964148e92f65e54fa1b6e3f906eb0c2daf225a26edcd39c835"
+  "dataset_checksum_sha256": "efae0a0813487033adebaeb528758f56236f7fbd22b1d6282020edf1c55d6629"
 }

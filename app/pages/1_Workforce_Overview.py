@@ -205,3 +205,36 @@ elif availability is None:
     render_alert_banner("info", "availability.csv not found — utilization gauges unavailable.")
 else:
     st.info("Missing required columns for utilization breakdown.")
+
+# ── Weekly Capacity Reconciliation & Exceptions ─────────────────────────────
+st.divider()
+st.subheader("⚖️ Weekly Capacity Reconciliation & Over-Allocation Exceptions")
+st.caption("Source-driven reconciliation: Contracted = Base × FTE | Net = Contracted − Leave | Remaining = Net − Allocated (Unclamped)")
+
+try:
+    from src.services.capacity_service import reconcile_weekly_capacities_df
+    recon_df = reconcile_weekly_capacities_df(data_dir=DATA_DIR)
+    if not recon_df.empty:
+        c1, c2, c3, c4 = st.columns(4)
+        over_allocated = recon_df[recon_df["capacity_status"] == "OVER_ALLOCATED"]
+        on_leave = recon_df[recon_df["capacity_status"] == "ON_APPROVED_LEAVE"]
+        fully_alloc = recon_df[recon_df["capacity_status"] == "FULLY_ALLOCATED"]
+        bench_free = recon_df[recon_df["capacity_status"] == "AVAILABLE_BENCH"]
+
+        c1.metric("Total Reconciled Staff", len(recon_df))
+        c2.metric("Over-Allocated Exceptions", len(over_allocated), delta=f"-{len(over_allocated)}" if len(over_allocated) > 0 else "0", delta_color="inverse")
+        c3.metric("On Approved Leave", len(on_leave))
+        c4.metric("Available on Bench", len(bench_free))
+
+        if not over_allocated.empty:
+            render_alert_banner("warning", f"**Over-Allocation Alert**: {len(over_allocated)} employee(s) have negative remaining capacity after factoring contracted FTE, approved leave, and project allocations.")
+            st.dataframe(
+                over_allocated[["employee_id", "employee_name", "department", "fte", "contracted_hours", "approved_leave_hours", "allocated_hours", "remaining_capacity_hours", "over_allocation_percentage", "capacity_status"]],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        with st.expander("📋 View Full Period Capacity Reconciliation Table", expanded=False):
+            st.dataframe(recon_df, use_container_width=True, hide_index=True)
+except Exception as exc:
+    st.info(f"Capacity reconciliation preview unavailable: {exc}")

@@ -23,25 +23,27 @@
     "availability.csv": 49,
     "gap_analysis.csv": 84,
     "training.csv": 50,
-    "historical_event_log.csv": 467
+    "historical_event_log.csv": 529
   },
   "edge_cases_injected": 4,
-  "reproducibility_sha256": "5126d72ce3f89f964148e92f65e54fa1b6e3f906eb0c2daf225a26edcd39c835",
+  "reproducibility_sha256": "efae0a0813487033adebaeb528758f56236f7fbd22b1d6282020edf1c55d6629",
   "file_checksums_sha256": {
     "allocations.csv": "b6325039fc2581198a4bde2a27e4488107e53c54cb23c638c92b9b82e244ca7a",
-    "anomaly_detection_results.csv": "fdd1b1169c5310d0c3416e8b92aa548f79977da9c32fec29211773685a617158",
+    "anomaly_detection_results.csv": "839ce46a80341b8c0b0c2382c2508e5f90114a1cefe4dabc359b82a12fa32492",
     "availability.csv": "7f92400a7a0d63ec2af8211431971aa864fab86ef15d95b5d970508d5cef32cc",
+    "demand_duplicate_exceptions.csv": "51d0dfaf09db39b7658d324edb727eb499cfd3522c12592f81a40eb623182955",
     "demand_plans.csv": "5796a4aee51b1a7adf4dca8b69de4fa987cd602ce5c028559fa0fb494a407da2",
     "employees.csv": "1c7fc7bcb3b9140dddf7198168a839f51b281521248f93da65be0ffac990fde8",
-    "employee_skills.csv": "032297e35574890d9edff3f29084a1dc86e93db9a40fb84e53cc155381388ee6",
-    "gap_analysis.csv": "27fd2174d7ca65f0fe1eb648369fea1b40006b682dd0d3412df7a8662268683c",
+    "employee_skills.csv": "b010f65a4ae20d1e2a48a1b4dcd08f931c916c6f271ba61e0c0e0f5209bd3bf5",
+    "gap_analysis.csv": "c2f1d7f218849109ad5405db219f8ca2418b7a23f5e4eadf6f154045ccc1d73b",
     "ground_truth.csv": "0323019165ee8fbae30e7e4f8ca6d3703cf3e1b9a51497e7172fe54a775e528a",
-    "historical_event_log.csv": "3ce43697018114488ed8d1a52736acc7b9b93651cfd01198d48ce0f2e9bdfb3a",
+    "historical_event_log.csv": "8215aaf77592255663dd88cf7a109964574831f739657c56088c34ec2e927ec7",
     "leave_events.csv": "5237b8c8b9dc0de21ebb9a88b3c943b7db9499272dade98f90e3de391a9069a6",
     "projects.csv": "59d977b829a2a3de8edb617f8e058d9a0021dcaab416bbb32c292278e94bf5e9",
     "roles.csv": "40cbeb943998ab6a46b6c12e3caa9a7b4462c7804f7b5ec924e6fba20ad98cb5",
-    "seeds.sql": "fc82069ff1e7d2a22113ca8e4be19dcd9012c127e9fab6526ca072bab88a24e4",
+    "seeds.sql": "3ccf24d17ed59b583129e13aa478e7a2f98a5c1b456390aac4121baf0ed51cc0",
     "skills.csv": "43a99b905ad2ef57dc49ebec22703b5d3ce87074b38da05f2c8f1cb47d3be77a",
-    "training.csv": "ecca0e79183eefe32dc2d93b63cc5aa2340dfa57feb1a90d8c51a2d4567b3de6"
+    "training.csv": "b967b18ec9eda6de5de028ae916b6e76d73aa4bccd22673e443449ad6798e303",
+    "validation_errors.csv": "3168b8a1c346204ed0f3936338da108f9d8cb0bf71a3f596a15a7216773a9622"
   }
 }

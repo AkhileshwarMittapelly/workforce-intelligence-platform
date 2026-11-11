@@ -193,3 +193,40 @@ st.download_button(
     file_name="demand_schedule.csv",
     mime="text/csv",
 )
+
+# ── Demand Duplication & Forecast Comparison ──────────────────────────────────
+st.divider()
+st.subheader("🔍 Demand Duplication Analysis & Corrected Forecast Comparison")
+st.caption("Composite duplicate detection on: Project + Role + Required Skill + Period Start + Period End")
+
+try:
+    from src.services.forecast_service import forecast_comparison, evaluate_forecast_accuracy
+    comparison = forecast_comparison()
+
+    c_dup1, c_dup2, c_dup3 = st.columns(3)
+    c_dup1.metric("Original Demanded FTE (Raw)", f"{comparison['original_total_demand_fte']:.2f}")
+    c_dup2.metric("Corrected Demanded FTE (Deduplicated)", f"{comparison['corrected_total_demand_fte']:.2f}")
+    c_dup3.metric("Double-Counted FTE Removed", f"{comparison['double_counted_fte_delta']:.2f}", delta=f"-{comparison['double_counted_fte_delta']:.2f}", delta_color="inverse")
+
+    dup_list = comparison.get("duplicate_exceptions", [])
+    if dup_list:
+        st.warning(f"⚠️ **{len(dup_list)} duplicate demand record(s) detected and flagged for exclusion from corrected planning horizons.**")
+        st.dataframe(pd.DataFrame(dup_list), use_container_width=True, hide_index=True)
+    else:
+        st.success("✓ No composite duplicate demand records detected in current horizon.")
+
+    # ── Holdout Forecast Accuracy Evaluation ──────────────────────────────────
+    st.divider()
+    st.subheader("🎯 Statistical Forecast Accuracy Metrics (Empirical Holdout)")
+    st.caption("Standard statistical evaluation comparing forward labor requirements against empirical committed allocations")
+
+    acc = evaluate_forecast_accuracy()
+    if acc.get("status") == "EVALUATED":
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("Mean Absolute Error (MAE)", f"{acc['mae']} FTE")
+        a2.metric("Root Mean Squared Error (RMSE)", f"{acc['rmse']} FTE")
+        a3.metric("WAPE %", f"{acc['wape_pct']}%")
+        a4.metric("Forecast Bias %", f"{acc['forecast_bias_pct']}%")
+        st.info(f"**Target Variable**: {acc['target_variable']} | **Evaluation Horizon**: Sample of {acc['sample_size']} active delivery initiatives | **Assumptions**: {acc['assumptions']}")
+except Exception as exc:
+    st.info(f"Duplicate comparison & accuracy evaluation preview unavailable: {exc}")
