@@ -35,9 +35,10 @@ def _query_or_fallback(query: str, csv_name: str) -> pd.DataFrame:
     """Tries executing SQL query on SQLAlchemy engine; falls back to CSV on any error."""
     try:
         engine = get_engine()
-        df = pd.read_sql_query(text(query), con=engine)
-        if not df.empty:
-            return df
+        with engine.connect() as conn:
+            df = pd.read_sql_query(text(query), con=conn)
+            if not df.empty:
+                return df
     except Exception as e:
         logger.debug("Database query failed (%s), falling back to CSV %s", e, csv_name)
     return _read_csv(csv_name)
