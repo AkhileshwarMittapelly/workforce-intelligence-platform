@@ -1,0 +1,16 @@
+role_id,role_code,role_name,department,job_level,standard_hourly_cost,description,status,effective_from,effective_to,is_current,created_at,updated_at
+ROL-0001,RC-SOFTWARE-ENGINEER-0001,Software Engineer,Engineering,MID,102.85,Software Engineer responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0002,RC-SENIOR-SOFTWARE-ENGI-0002,Senior Software Engineer,Engineering,SENIOR,125.04,Senior Software Engineer responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0003,RC-LEAD-ENGINEER-0003,Lead Engineer,Engineering,LEAD,153.29,Lead Engineer responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0004,RC-PRINCIPAL-ENGINEER-0004,Principal Engineer,Engineering,PRINCIPAL,180.2,Principal Engineer responsible for Engineering activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0005,RC-DATA-SCIENTIST-0005,Data Scientist,Data & AI,MID,102.85,Data Scientist responsible for Data & AI activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0006,RC-SENIOR-DATA-SCIENTIS-0006,Senior Data Scientist,Data & AI,SENIOR,130.53,Senior Data Scientist responsible for Data & AI activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0007,RC-ML-ENGINEER-0007,ML Engineer,Data & AI,MID,114.92,ML Engineer responsible for Data & AI activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0008,RC-DATA-ENGINEER-0008,Data Engineer,Data & AI,MID,109.17,Data Engineer responsible for Data & AI activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0009,RC-CLOUD-ARCHITECT-0009,Cloud Architect,Cloud Operations,SENIOR,128.13,Cloud Architect responsible for Cloud Operations activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0010,RC-DEVOPS-ENGINEER-0010,DevOps Engineer,Cloud Operations,MID,106.99,DevOps Engineer responsible for Cloud Operations activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0011,RC-SECURITY-ANALYST-0011,Security Analyst,Security,MID,115.67,Security Analyst responsible for Security activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0012,RC-SECURITY-ENGINEER-0012,Security Engineer,Security,SENIOR,126.31,Security Engineer responsible for Security activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0013,RC-PRODUCT-MANAGER-0013,Product Manager,Product,SENIOR,130.49,Product Manager responsible for Product activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0014,RC-UX-DESIGNER-0014,UX Designer,Product,MID,114.84,UX Designer responsible for Product activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00
+ROL-0015,RC-BUSINESS-ANALYST-0015,Business Analyst,Finance,JUNIOR,94.81,Business Analyst responsible for Finance activities.,ACTIVE,2022-01-01,,True,2022-01-01T00:00:00,2022-01-01T00:00:00

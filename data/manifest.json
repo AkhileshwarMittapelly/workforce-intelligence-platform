@@ -1,0 +1,25 @@
+{
+  "platform": "Workforce Intelligence Platform",
+  "generator_command": "python src/generators/synthetic_data_generator.py --scale starter --seed 20261022",
+  "seed": 20261022,
+  "scale": "starter",
+  "provenance": {
+    "source_type": "100% Synthetic Data",
+    "lawful_use_notice": "Generated deterministically via Python Faker and NumPy seeded RNG. No proprietary, personal, or copyrighted third-party data was accessed or scraped.",
+    "jurisdiction_compliance": "Fully compliant with public data and synthetic data generation guidelines."
+  },
+  "entities": {
+    "roles.csv": 15,
+    "employees.csv": 50,
+    "skills.csv": 30,
+    "employee_skills.csv": 232,
+    "projects.csv": 20,
+    "demand_plans.csv": 48,
+    "allocations.csv": 51,
+    "availability.csv": 49,
+    "training.csv": 50,
+    "gap_analysis.csv": 48
+  },
+  "edge_cases_injected": 5,
+  "reproducibility_md5": "bf1f5d5950222a28b5a020bcaf6c30b6"
+}

@@ -1,0 +1,37 @@
+[
+  {
+    "issue_type": "STALE_SKILL_ACTIVE",
+    "entity_id": "ESK-000001",
+    "expected_flag": "STALE_PROFICIENCY",
+    "edge_case_label": "EC-2",
+    "detail": "last_evaluated_date=2024-01-01 but status=ACTIVE (>18 months stale)"
+  },
+  {
+    "issue_type": "DEMAND_DOUBLE_COUNTED",
+    "entity_id": "DEM-PRJ-2026-000001-2026W01-99",
+    "expected_flag": "DUPLICATE_DEMAND",
+    "edge_case_label": "EC-3",
+    "detail": "Duplicate demand: same project=PRJ-2026-000001, role=ROL-0010, week=1 as DEM-PRJ-2026-000001-2026W13"
+  },
+  {
+    "issue_type": "OVER_ALLOCATED",
+    "entity_id": "ALLOC-2026-000049",
+    "expected_flag": "ALLOCATION_EXCEEDS_CAPACITY",
+    "edge_case_label": "EC-1",
+    "detail": "allocation_hours=34.0 > contracted_capacity=14.0 for emp=EMP-000003"
+  },
+  {
+    "issue_type": "OVERLAPPING_ALLOCATION",
+    "entity_id": "ALLOC-2026-000050",
+    "expected_flag": "DATE_OVERLAP_CONFLICT",
+    "edge_case_label": "EC-4",
+    "detail": "Employee EMP-000004 has overlapping allocations 2026-03-01\u21922026-04-30 on project PRJ-2026-000001"
+  },
+  {
+    "issue_type": "OVERLAPPING_ALLOCATION",
+    "entity_id": "ALLOC-2026-000051",
+    "expected_flag": "DATE_OVERLAP_CONFLICT",
+    "edge_case_label": "EC-4",
+    "detail": "Employee EMP-000004 has overlapping allocations 2026-03-01\u21922026-04-30 on project PRJ-2026-000002"
+  }
+]
