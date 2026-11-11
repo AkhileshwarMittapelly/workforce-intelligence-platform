@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -86,6 +86,10 @@ def _load_allocations_csv() -> pd.DataFrame:
     return _load_csv("allocations.csv")
 
 
+def _load_leave_events_csv() -> pd.DataFrame:
+    return _load_csv("leave_events.csv")
+
+
 # ---------------------------------------------------------------------------
 # Core forecast logic (operates on DataFrames regardless of source)
 # ---------------------------------------------------------------------------
@@ -98,6 +102,7 @@ def _compute_forecasts(
     period_start: Optional[date] = None,
     period_end: Optional[date] = None,
     granularity: str = "week",   # "week" | "month"
+    leave_events_df: Optional[pd.DataFrame] = None,
 ) -> list[ForecastResult]:
     """
     Core logic: compute ForecastResult list from DataFrames.
@@ -107,10 +112,11 @@ def _compute_forecasts(
                    period_start, period_end (or week_number / month).
         employees_df: Columns expected include employee_id, fte, status.
         employee_skills_df: Columns expected include employee_id, skill_id, proficiency_level.
-        allocations_df: Columns expected include employee_id, allocated_fte (or allocation_pct).
+        allocations_df: Columns expected include employee_id, allocated_fte (or allocation_pct), start_date, end_date.
         period_start: Filter demand from this date (inclusive).
         period_end: Filter demand to this date (inclusive).
         granularity: "week" or "month".
+        leave_events_df: Optional DataFrame of leave events (approved leave reduces capacity).
     """
     if demand_df.empty:
         return []
@@ -167,7 +173,6 @@ def _compute_forecasts(
         skill_col = "required_skill_id"
 
     role_col = "role_id" if "role_id" in demand_df.columns else None
-    prj_col = "project_id" if "project_id" in demand_df.columns else None
 
     # Required proficiency from demand (support min_proficiency_level & required_proficiency)
     req_prof_col = None
@@ -189,9 +194,14 @@ def _compute_forecasts(
 
     # Active employees
     if not employees_df.empty and "status" in employees_df.columns:
-        active_emp = employees_df[employees_df["status"].str.upper() == "ACTIVE"]
+        active_emp = employees_df[employees_df["status"].str.upper() == "ACTIVE"].copy()
     else:
-        active_emp = employees_df
+        active_emp = employees_df.copy()
+
+    emp_contracted_map = {}
+    if not active_emp.empty:
+        fte_series = active_emp["fte"].fillna(1.0).astype(float) if "fte" in active_emp.columns else pd.Series(1.0, index=active_emp.index)
+        emp_contracted_map = dict(zip(active_emp["employee_id"], fte_series))
 
     # Build employee→skills lookup with proficiency and freshness
     skill_cols_avail = ["employee_id", "skill_id", "proficiency_level"]
@@ -215,7 +225,8 @@ def _compute_forecasts(
     else:
         skill_lookup = pd.DataFrame(columns=["employee_id", "skill_id", "proficiency_level"])
 
-    # Build allocated FTE per employee (sum across allocations, support allocation_percentage)
+    # Prepare allocations with date parsing and fte values
+    alloc_work = pd.DataFrame()
     if not allocations_df.empty:
         alloc_work = allocations_df.copy()
         if "allocation_percentage" in alloc_work.columns:
@@ -227,50 +238,43 @@ def _compute_forecasts(
         else:
             alloc_work["_fte_val"] = 0.5
 
-        emp_alloc = (
-            alloc_work.groupby("employee_id")["_fte_val"]
-            .sum()
-            .clip(upper=1.0)
-            .reset_index()
-            .rename(columns={"_fte_val": "total_allocated_fte"})
-        )
-    else:
-        emp_alloc = pd.DataFrame(columns=["employee_id", "total_allocated_fte"])
+        if "start_date" in alloc_work.columns:
+            alloc_work["_s"] = pd.to_datetime(alloc_work["start_date"], errors="coerce")
+        if "end_date" in alloc_work.columns:
+            alloc_work["_e"] = pd.to_datetime(alloc_work["end_date"], errors="coerce")
 
-    # Merge active employees with allocations to find available FTE per employee
-    if not active_emp.empty:
-        emp_fte_col = "fte" if "fte" in active_emp.columns else None
-        if emp_fte_col:
-            emp_base = active_emp[["employee_id", "fte"]].copy()
+    # Prepare leave events with date parsing
+    leave_work = pd.DataFrame()
+    if leave_events_df is not None and not leave_events_df.empty:
+        leave_copy = leave_events_df.copy()
+        leave_copy.columns = [c.strip().lower() for c in leave_copy.columns]
+        app_col = next((c for c in ("approval_status", "status") if c in leave_copy.columns), None)
+        if app_col:
+            leave_work = leave_copy[leave_copy[app_col].astype(str).str.upper() == "APPROVED"].copy()
         else:
-            emp_base = active_emp[["employee_id"]].copy()
-            emp_base["fte"] = 1.0
+            leave_work = leave_copy.copy()
 
-        if not emp_alloc.empty:
-            emp_base = emp_base.merge(emp_alloc, on="employee_id", how="left")
-            emp_base["total_allocated_fte"] = emp_base["total_allocated_fte"].fillna(0.0)
-        else:
-            emp_base["total_allocated_fte"] = 0.0
-
-        emp_base["available_fte"] = (emp_base["fte"] - emp_base["total_allocated_fte"]).clip(lower=0.0)
-    else:
-        emp_base = pd.DataFrame(columns=["employee_id", "fte", "available_fte"])
-
-    # Merge skills with available capacity
-    if not skill_lookup.empty and not emp_base.empty:
-        skill_avail = skill_lookup.merge(emp_base[["employee_id", "available_fte"]], on="employee_id", how="left")
-        skill_avail["available_fte"] = skill_avail["available_fte"].fillna(0.0)
-    else:
-        skill_avail = skill_lookup.copy()
-        if "available_fte" not in skill_avail.columns:
-            skill_avail["available_fte"] = 0.0
+        if not leave_work.empty:
+            leave_work["_s"] = pd.to_datetime(leave_work.get("start_date"), errors="coerce")
+            leave_work["_e"] = pd.to_datetime(leave_work.get("end_date"), errors="coerce")
+            leave_work["_fte"] = (leave_work.get("leave_hours", 0.0).astype(float) / 40.0).clip(upper=1.0)
 
     # Aggregate demand
     group_cols = ["_period", skill_col]
     if role_col:
         group_cols.append(role_col)
 
-    demand_agg = demand_df.groupby(group_cols)[fte_col].sum().reset_index()
+    agg_spec = {
+        fte_col: "sum",
+    }
+    if "_dt_start" in demand_df.columns:
+        agg_spec["_dt_start"] = "min"
+    if "_dt_end" in demand_df.columns:
+        agg_spec["_dt_end"] = "max"
+    if req_prof_col:
+        agg_spec[req_prof_col] = "max"
+
+    demand_agg = demand_df.groupby(group_cols).agg(agg_spec).reset_index()
     demand_agg = demand_agg.rename(columns={fte_col: "demand_fte", skill_col: "skill_id"})
     if role_col:
         demand_agg = demand_agg.rename(columns={role_col: "role_id"})
@@ -278,43 +282,104 @@ def _compute_forecasts(
         demand_agg["role_id"] = "UNKNOWN"
 
     results: list[ForecastResult] = []
+    consumed_period_capacity: dict[tuple, float] = {}
 
     for _, row in demand_agg.iterrows():
         period = str(row["_period"])
         role_id = str(row["role_id"])
         skill_id = str(row["skill_id"])
         demand_fte = float(row["demand_fte"])
+        req_prof = int(row[req_prof_col]) if req_prof_col and req_prof_col in row.index else 1
 
-        # Required proficiency for this skill from demand_df (take max as conservative)
-        if req_prof_col:
-            skill_demand_rows = demand_df[demand_df[skill_col] == row["skill_id"]]
-            req_prof = int(skill_demand_rows[req_prof_col].max()) if not skill_demand_rows.empty else 1
-        else:
-            req_prof = 1
+        # Period start and end
+        ps_ts = pd.to_datetime(row.get("_dt_start")) if "_dt_start" in row.index else pd.NaT
+        pe_ts = pd.to_datetime(row.get("_dt_end")) if "_dt_end" in row.index else pd.NaT
 
-        # Supply: employees with this skill AND proficiency >= required
-        if not skill_avail.empty and "skill_id" in skill_avail.columns:
-            qualified = skill_avail[
-                (skill_avail["skill_id"] == skill_id)
-                & (skill_avail["proficiency_level"].fillna(1) >= req_prof)
+        # If missing, infer from period string
+        if pd.isna(ps_ts) or pd.isna(pe_ts):
+            if "-W" in period:
+                try:
+                    ps_ts = pd.to_datetime(datetime.strptime(f"{period}-1", "%G-W%V-%u"))
+                    pe_ts = ps_ts + pd.Timedelta(days=6)
+                except Exception:
+                    ps_ts = pd.Timestamp("2026-01-01")
+                    pe_ts = pd.Timestamp("2026-12-31")
+            else:
+                try:
+                    ps_ts = pd.to_datetime(f"{period}-01")
+                    pe_ts = (ps_ts + pd.DateOffset(months=1)) - pd.Timedelta(days=1)
+                except Exception:
+                    ps_ts = pd.Timestamp("2026-01-01")
+                    pe_ts = pd.Timestamp("2026-12-31")
+
+        # Supply: qualified active employees with this skill AND proficiency >= req_prof
+        if not skill_lookup.empty and "skill_id" in skill_lookup.columns:
+            qualified_rows = skill_lookup[
+                (skill_lookup["skill_id"] == skill_id)
+                & (skill_lookup["proficiency_level"].fillna(1) >= req_prof)
             ]
-            supply_fte = float(qualified["available_fte"].sum())
+            qualified_emp_ids = [eid for eid in qualified_rows["employee_id"].unique() if eid in emp_contracted_map]
         else:
-            supply_fte = 0.0
+            qualified_emp_ids = []
 
+        total_qualified_avail = 0.0
+        total_already_allocated = 0.0
+        matched_to_demand = 0.0
+
+        for emp_id in qualified_emp_ids:
+            contracted = emp_contracted_map.get(emp_id, 1.0)
+
+            # Period-specific overlapping allocations
+            if not alloc_work.empty and "_s" in alloc_work.columns and "_e" in alloc_work.columns:
+                emp_allocs = alloc_work[
+                    (alloc_work["employee_id"] == emp_id)
+                    & (alloc_work["_s"] <= pe_ts)
+                    & (alloc_work["_e"] >= ps_ts)
+                ]
+                alloc_fte = float(emp_allocs["_fte_val"].sum()) if not emp_allocs.empty else 0.0
+            elif not alloc_work.empty:
+                emp_allocs = alloc_work[alloc_work["employee_id"] == emp_id]
+                alloc_fte = float(emp_allocs["_fte_val"].sum()) if not emp_allocs.empty else 0.0
+            else:
+                alloc_fte = 0.0
+
+            # Period-specific approved leave
+            if not leave_work.empty and "_s" in leave_work.columns and "_e" in leave_work.columns:
+                emp_leaves = leave_work[
+                    (leave_work["employee_id"] == emp_id)
+                    & (leave_work["_s"] <= pe_ts)
+                    & (leave_work["_e"] >= ps_ts)
+                ]
+                leave_fte = float(emp_leaves["_fte"].sum()) if not emp_leaves.empty else 0.0
+            else:
+                leave_fte = 0.0
+
+            net_avail = max(0.0, contracted - alloc_fte - leave_fte)
+            total_already_allocated += min(alloc_fte, contracted)
+
+            # Avoid double-counting capacity across demands in the same period
+            prior_committed = consumed_period_capacity.get((emp_id, period), 0.0)
+            usable_cap = max(0.0, net_avail - prior_committed)
+            total_qualified_avail += usable_cap
+
+            commit_amt = min(usable_cap, max(0.0, demand_fte - matched_to_demand))
+            consumed_period_capacity[(emp_id, period)] = prior_committed + commit_amt
+            matched_to_demand += commit_amt
+
+        supply_fte = total_qualified_avail
         gap_fte = max(0.0, demand_fte - supply_fte)
 
         # Utilization: what fraction of supply is consumed by demand
         if supply_fte > 0:
-            utilization_pct = min((demand_fte / supply_fte) * 100.0, 150.0)  # cap at 150%
+            utilization_pct = min((demand_fte / supply_fte) * 100.0, 150.0)
         elif demand_fte > 0:
-            utilization_pct = 150.0  # no supply → worst case
+            utilization_pct = 150.0
         else:
             utilization_pct = 0.0
 
         risk = _risk_level(utilization_pct)
-
         forecast_id = f"FCST-{period}-{role_id}-{skill_id}"
+
         results.append(
             ForecastResult(
                 period=period,
@@ -327,11 +392,11 @@ def _compute_forecasts(
                 risk_level=risk,
                 project_id="ALL",
                 forecast_id=forecast_id,
-                already_allocated_fte=0.0,
+                already_allocated_fte=round(total_already_allocated, 4),
                 qualified_available_fte=round(supply_fte, 4),
                 remaining_supply_fte=max(0.0, round(supply_fte - demand_fte, 4)),
                 calculation_timestamp="2026-11-11T12:00:00",
-                assumptions=f"Proficiency threshold >= {req_prof}; Active & non-stale <= 18 months",
+                assumptions=f"Proficiency threshold >= {req_prof}; Active & non-stale <= 18 months; Period-specific leave & allocations",
             )
         )
 
@@ -365,6 +430,7 @@ def forecast_csv(
     employees_df = _load_employees_csv()
     employee_skills_df = _load_employee_skills_csv()
     allocations_df = _load_allocations_csv()
+    leave_events_df = _load_leave_events_csv()
 
     return _compute_forecasts(
         demand_df,
@@ -374,6 +440,7 @@ def forecast_csv(
         period_start=period_start,
         period_end=period_end,
         granularity=granularity,
+        leave_events_df=leave_events_df,
     )
 
 
@@ -426,14 +493,22 @@ def forecast_db(
         )
 
         employee_skills_df = pd.read_sql(
-            sa_text("SELECT employee_id, skill_id, proficiency_level FROM employee_skill"),
+            sa_text("SELECT employee_id, skill_id, proficiency_level, last_evaluated_date FROM employee_skill"),
             session.bind,
         )
 
         allocations_df = pd.read_sql(
-            sa_text("SELECT employee_id, allocated_fte FROM allocation"),
+            sa_text("SELECT employee_id, allocated_fte, start_date, end_date FROM allocation"),
             session.bind,
         )
+
+        try:
+            leave_events_df = pd.read_sql(
+                sa_text("SELECT employee_id, start_date, end_date, leave_hours, approval_status FROM leave_event"),
+                session.bind,
+            )
+        except Exception:
+            leave_events_df = pd.DataFrame()
 
         return _compute_forecasts(
             demand_df,
@@ -443,6 +518,7 @@ def forecast_db(
             period_start=period_start,
             period_end=period_end,
             granularity=granularity,
+            leave_events_df=leave_events_df,
         )
 
     except Exception as exc:

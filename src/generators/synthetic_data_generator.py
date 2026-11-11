@@ -25,7 +25,7 @@ import json
 import os
 import sys
 import warnings
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import numpy as np
@@ -629,8 +629,15 @@ class SyntheticDataGenerator:
         for i in range(1, self.n_projects + 1):
             prj_id = generate_project_id(YEAR, i)
             prj_code = f"PRJ-{YEAR}-{i:04d}"
-            start_date = self._rand_date(date(2026, 1, 1), date(2026, 6, 30))
-            end_date = start_date + timedelta(days=int(self.rng.integers(30, 365)))
+            # Ensure at least 15% of projects span the entire year 2026 including week 53
+            if i <= max(3, self.n_projects // 6):
+                start_date = date(2026, 1, 1)
+                end_date = date(2027, 1, 5)
+            else:
+                start_date = self._rand_date(date(2026, 1, 1), date(2026, 6, 30))
+                end_date = start_date + timedelta(days=int(self.rng.integers(90, 365)))
+                if end_date < date(2026, 6, 1):
+                    end_date = date(2026, 6, 1)
             mgr_id = active_emp_ids[int(self.rng.integers(0, len(active_emp_ids)))] if active_emp_ids else None
             rows.append(
                 {
@@ -665,7 +672,9 @@ class SyntheticDataGenerator:
 
         rows = []
         seq = 1
-        iso_weeks = list(range(1, 53))
+        seen_demand_ids: set[str] = set()
+        # 2026 has 53 ISO weeks (2026-01-01 to 2026-12-31 is Thursday to Thursday)
+        iso_weeks = list(range(1, 54))
 
         demands_per_project = max(2, self.n_projects // 5)
 
@@ -677,10 +686,15 @@ class SyntheticDataGenerator:
             prj_weeks = []
             for w in iso_weeks:
                 wm = week_monday(YEAR, w)
-                if prj_start <= wm <= prj_end:
+                ws = week_sunday(YEAR, w)
+                if prj_start <= wm and ws <= prj_end:
                     prj_weeks.append(w)
             if not prj_weeks:
-                prj_weeks = [prj_start.isocalendar()[1]]
+                # If project bounds don't cover a full week, align project to cover at least week 1
+                prj_weeks = [1]
+                p_idx = self.projects_df[self.projects_df["project_id"] == prj_id].index[0]
+                self.projects_df.loc[p_idx, "start_date"] = iso(week_monday(YEAR, 1))
+                self.projects_df.loc[p_idx, "end_date"] = iso(week_sunday(YEAR, 1))
 
             n_demands = int(self.rng.integers(1, demands_per_project + 1))
             for _ in range(n_demands):
@@ -688,10 +702,11 @@ class SyntheticDataGenerator:
                 role_id = role_ids[int(self.rng.integers(0, len(role_ids)))]
                 skill_id = skill_ids[int(self.rng.integers(0, len(skill_ids)))]
                 demand_id = generate_demand_id(prj_id, YEAR, week)
-                # Avoid exact duplicate demand_id (use sequence suffix for genuine extras)
-                while any(r["demand_id"] == demand_id for r in rows):
-                    seq += 1
-                    demand_id = generate_demand_id(prj_id, YEAR, week, seq)
+                suffix = 1
+                while demand_id in seen_demand_ids:
+                    suffix += 1
+                    demand_id = generate_demand_id(prj_id, YEAR, week, suffix)
+                seen_demand_ids.add(demand_id)
 
                 start_date = week_monday(YEAR, week)
                 end_date = week_sunday(YEAR, week)
@@ -708,7 +723,7 @@ class SyntheticDataGenerator:
                         "start_date": iso(start_date),
                         "end_date": iso(end_date),
                         "priority": self._choice(DEMAND_PRIORITIES),
-                        "fulfillment_status": self._choice(FULFILLMENT_STATUSES),
+                        "fulfillment_status": "UNFULFILLED",  # derived from allocations later
                         "status": self._choice(DEMAND_PLAN_STATUSES),
                         "effective_from": iso(start_date),
                         "effective_to": None,
@@ -720,23 +735,42 @@ class SyntheticDataGenerator:
                 )
                 seq += 1
 
-        # Ensure all 52 weeks (12 months) have active demand coverage
+        # Ensure all 53 weeks (full 2026 calendar horizon) have active demand coverage
         covered_weeks = {
             date.fromisoformat(r["start_date"]).isocalendar()[1] for r in rows
         }
         missing_weeks = [w for w in iso_weeks if w not in covered_weeks]
         for mw in missing_weeks:
             wm = week_monday(YEAR, mw)
-            # Find a project covering this week or fallback to any project
-            p_id = project_ids[mw % len(project_ids)]
+            ws = week_sunday(YEAR, mw)
+
+            # Find a project whose dates strictly cover [wm, ws]
+            covering = [
+                pid for pid in project_ids
+                if date.fromisoformat(str(self.projects_df.loc[self.projects_df["project_id"] == pid, "start_date"].iloc[0])) <= wm
+                and date.fromisoformat(str(self.projects_df.loc[self.projects_df["project_id"] == pid, "end_date"].iloc[0])) >= ws
+            ]
+            if covering:
+                p_id = covering[mw % len(covering)]
+            else:
+                p_id = project_ids[mw % len(project_ids)]
+                p_idx = self.projects_df[self.projects_df["project_id"] == p_id].index[0]
+                p_st = date.fromisoformat(str(self.projects_df.loc[p_idx, "start_date"]))
+                p_en = date.fromisoformat(str(self.projects_df.loc[p_idx, "end_date"]))
+                if p_st > wm:
+                    self.projects_df.loc[p_idx, "start_date"] = iso(wm)
+                if p_en < ws:
+                    self.projects_df.loc[p_idx, "end_date"] = iso(ws)
+
             r_id = role_ids[mw % len(role_ids)]
             s_id = skill_ids[mw % len(skill_ids)]
             d_id = generate_demand_id(p_id, YEAR, mw)
-            while any(r["demand_id"] == d_id for r in rows):
-                seq += 1
-                d_id = generate_demand_id(p_id, YEAR, mw, seq)
-            st_d = wm
-            en_d = week_sunday(YEAR, mw)
+            suffix = 1
+            while d_id in seen_demand_ids:
+                suffix += 1
+                d_id = generate_demand_id(p_id, YEAR, mw, suffix)
+            seen_demand_ids.add(d_id)
+
             rows.append(
                 {
                     "demand_id": d_id,
@@ -746,16 +780,16 @@ class SyntheticDataGenerator:
                     "min_proficiency_level": int(self.rng.integers(1, 6)),
                     "headcount_required": int(self.rng.integers(1, 4)),
                     "required_fte": round(float(self.rng.uniform(0.5, 2.0)), 2),
-                    "start_date": iso(st_d),
-                    "end_date": iso(en_d),
+                    "start_date": iso(wm),
+                    "end_date": iso(ws),
                     "priority": self._choice(DEMAND_PRIORITIES),
-                    "fulfillment_status": "UNFULFILLED",
+                    "fulfillment_status": "UNFULFILLED",  # derived from allocations later
                     "status": "APPROVED",
-                    "effective_from": iso(st_d),
+                    "effective_from": iso(wm),
                     "effective_to": None,
                     "is_current": True,
-                    "created_at": f"{st_d}T00:00:00",
-                    "updated_at": f"{st_d}T00:00:00",
+                    "created_at": f"{wm}T00:00:00",
+                    "updated_at": f"{wm}T00:00:00",
                     "_edge_case": None,
                 }
             )
@@ -763,12 +797,12 @@ class SyntheticDataGenerator:
 
         df = pd.DataFrame(rows)
 
-        # --- Inject EC-3: duplicate demand (same project+role+week) ---
+        # --- Inject EC-3: duplicate demand (same project+role+skill+start_date+end_date) ---
         if not df.empty:
-            # Duplicate the first demand row with a new ID
             orig = df.iloc[0].copy()
             orig_demand_id = orig["demand_id"]
-            new_demand_id = generate_demand_id(orig["project_id"], YEAR, 1, 99)
+            orig_week = date.fromisoformat(str(orig["start_date"])).isocalendar()[1]
+            new_demand_id = generate_demand_id(orig["project_id"], YEAR, orig_week, 99)
             orig["demand_id"] = new_demand_id
             orig["_edge_case"] = "EC-3"
             df = pd.concat([df, pd.DataFrame([orig])], ignore_index=True)
@@ -780,7 +814,9 @@ class SyntheticDataGenerator:
                     "edge_case_label": "EC-3",
                     "detail": (
                         f"Duplicate demand: same project={orig['project_id']}, "
-                        f"role={orig['role_id']}, week=1 as {orig_demand_id}"
+                        f"role={orig['role_id']}, skill={orig['required_skill_id']}, "
+                        f"start_date={orig['start_date']}, end_date={orig['end_date']} "
+                        f"as {orig_demand_id}"
                     ),
                 }
             )
@@ -954,6 +990,9 @@ class SyntheticDataGenerator:
             # Ensure existing allocation is 40% so total is exactly 100% (not over-allocated, but overlapping)
             df.loc[df["employee_id"] == ec4_emp_id, "allocation_percentage"] = 40.00
             df.loc[df["employee_id"] == ec4_emp_id, "_alloc_hours"] = round(contracted * 0.40, 2)
+            df.loc[df["employee_id"] == ec4_emp_id, "start_date"] = iso(date(2026, 2, 15))
+            df.loc[df["employee_id"] == ec4_emp_id, "end_date"] = iso(date(2026, 3, 31))
+            df.loc[df["employee_id"] == ec4_emp_id, "effective_from"] = iso(date(2026, 2, 15))
             overlap_start = date(2026, 3, 1)
             overlap_end = date(2026, 4, 30)
 
@@ -1421,6 +1460,26 @@ class SyntheticDataGenerator:
         print("[datagen] Generating allocations...")
         self.allocations_df = self._generate_allocations()
 
+        # Derive demand fulfillment status from actual allocations
+        if self.demand_plans_df is not None and self.allocations_df is not None:
+            alloc_sum = {}
+            for _, a_row in self.allocations_df.iterrows():
+                d_id = a_row.get("demand_id")
+                if pd.notna(d_id) and d_id:
+                    pct = float(a_row.get("allocation_percentage", 0.0)) / 100.0
+                    alloc_sum[d_id] = alloc_sum.get(d_id, 0.0) + pct
+
+            for idx, d_row in self.demand_plans_df.iterrows():
+                d_id = d_row["demand_id"]
+                req_fte = float(d_row.get("required_fte", 1.0))
+                committed_fte = alloc_sum.get(d_id, 0.0)
+                if committed_fte >= req_fte:
+                    self.demand_plans_df.loc[idx, "fulfillment_status"] = "FULFILLED"
+                elif committed_fte > 0:
+                    self.demand_plans_df.loc[idx, "fulfillment_status"] = "PARTIALLY_FULFILLED"
+                else:
+                    self.demand_plans_df.loc[idx, "fulfillment_status"] = "UNFULFILLED"
+
         print("[datagen] Generating availability...")
         self.availability_df = self._generate_availability()
 
@@ -1434,6 +1493,8 @@ class SyntheticDataGenerator:
         self.historical_event_log_df = self._generate_historical_event_log()
 
         return self
+
+    generate_all = generate
 
     def export(self):
         """Write all CSVs to output_dir; strip internal helper columns."""
@@ -1536,7 +1597,7 @@ class SyntheticDataGenerator:
             "seed": self.seed,
             "scale": self.scale,
             "scenario_date": "2026-11-11",
-            "planning_horizon": "12 Months (2026W01 to 2026W52)",
+            "planning_horizon": "12 Months (2026W01 to 2026W53)",
             "provenance": {
                 "source_type": "100% Synthetic Data",
                 "lawful_use_notice": "Generated deterministically via Python Faker and NumPy seeded RNG. No proprietary, personal, or copyrighted third-party data was accessed or scraped.",
@@ -1552,31 +1613,37 @@ class SyntheticDataGenerator:
             json.dump(manifest_data, mf, indent=2)
         print(f"  Exported manifest.json: Source manifest & lawful provenance → {manifest_path}")
 
-        # Step 9: Validation Summary
+        # Step 10: Run validation BEFORE writing validation summary
+        errors = self.validate()
+        val_status = "PASSED" if len(errors) == 0 else "FAILED"
+
         val_summary_path = os.path.join(self.output_dir, "validation_summary.json")
         val_data = {
-            "status": "PASSED",
-            "validation_checks": {
-                "primary_key_uniqueness": "VERIFIED (0 duplicates across all 12 tables)",
-                "foreign_key_integrity": "VERIFIED (100% valid parent IDs)",
-                "enum_constraints": "VERIFIED (All values within defined schema sets)",
-                "id_regex_standards": "VERIFIED (100% pattern matching with schema regex)",
-                "date_ordering": "VERIFIED (start_date <= end_date across all tables)",
-                "demand_coverage_12m": "VERIFIED (All 52 weeks covered in forward demand)",
-                "arithmetic_reconciliation": "VERIFIED (shortage = max(0, required - available); net_capacity reconciled)",
-                "leave_capacity_reconciliation": "VERIFIED (Approved leave properly reduces available capacity)",
+            "status": val_status,
+            "timestamp": datetime.now().isoformat(),
+            "scale": self.scale,
+            "seed": self.seed,
+            "error_count": len(errors),
+            "errors": errors,
+            "checks_performed": {
+                "primary_key_uniqueness": "PASS" if not any("PK duplicate" in e for e in errors) else "FAIL",
+                "foreign_key_integrity": "PASS" if not any("FK violation" in e for e in errors) else "FAIL",
+                "enum_constraints": "PASS" if not any("Enum violation" in e for e in errors) else "FAIL",
+                "date_ordering": "PASS" if not any("Date order violation" in e for e in errors) else "FAIL",
+                "project_demand_bounds": "PASS" if not any("outside project" in e for e in errors) else "FAIL",
+                "demand_coverage_53_weeks": "PASS" if not any("missing ISO weeks" in e for e in errors) else "FAIL",
+                "gap_arithmetic_consistency": "PASS" if not any("Arithmetic error" in e for e in errors) else "FAIL",
                 "edge_cases_labeled": f"VERIFIED ({len(self.ground_truth_records)} anomalies labeled in ground_truth)"
             },
-            "checksum_sha256": self.checksum()
+            "intentional_anomaly_flags": [
+                f"[{r['edge_case_label']}] {r['issue_type']} on {r['entity_id']}: {r.get('expected_flag')}"
+                for r in self.ground_truth_records
+            ],
+            "dataset_checksum_sha256": self.checksum()
         }
         with open(val_summary_path, "w", encoding="utf-8") as vf:
             json.dump(val_data, vf, indent=2)
-        print(f"  Exported validation_summary.json: Validation summary → {val_summary_path}")
-
-        return exports
-        with open(val_summary_path, "w", encoding="utf-8") as vf:
-            json.dump(val_data, vf, indent=2)
-        print(f"  Exported validation_summary.json: Validation summary → {val_summary_path}")
+        print(f"  Exported validation_summary.json: Validation summary (status={val_status}) → {val_summary_path}")
 
         return exports
 
@@ -1661,6 +1728,31 @@ class SyntheticDataGenerator:
         date_order(self.allocations_df, "start_date", "end_date", "allocations")
         date_order(self.training_df, "start_date", "expected_completion_date", "training")
         date_order(self.gap_analysis_df, "period_start_date", "period_end_date", "gap_analysis")
+
+        # Demand coverage check for all 53 weeks
+        if self.demand_plans_df is not None and not self.demand_plans_df.empty:
+            covered_weeks = {
+                date.fromisoformat(str(r["start_date"])).isocalendar()[1] for _, r in self.demand_plans_df.iterrows()
+            }
+            missing_53 = set(range(1, 54)) - covered_weeks
+            if missing_53:
+                errors.append(f"Demand coverage missing ISO weeks: {sorted(list(missing_53))}")
+
+        # Project demand bounds check
+        if self.demand_plans_df is not None and self.projects_df is not None:
+            prj_map = dict(zip(
+                self.projects_df["project_id"],
+                zip(pd.to_datetime(self.projects_df["start_date"]), pd.to_datetime(self.projects_df["end_date"]))
+            ))
+            for _, d in self.demand_plans_df.iterrows():
+                pid = d["project_id"]
+                if pid in prj_map:
+                    p_st, p_en = prj_map[pid]
+                    d_st = pd.to_datetime(d["start_date"])
+                    d_en = pd.to_datetime(d["end_date"])
+                    if d_st < p_st or d_en > p_en:
+                        errors.append(f"Demand {d['demand_id']} [{d_st.date()}→{d_en.date()}] outside project {pid} [{p_st.date()}→{p_en.date()}]")
+                        break
 
         # Arithmetic check: shortage = max(0, required - available)
         for _, row in self.gap_analysis_df.iterrows():

@@ -1,15 +1,25 @@
 {
   "status": "PASSED",
-  "validation_checks": {
-    "primary_key_uniqueness": "VERIFIED (0 duplicates across all 12 tables)",
-    "foreign_key_integrity": "VERIFIED (100% valid parent IDs)",
-    "enum_constraints": "VERIFIED (All values within defined schema sets)",
-    "id_regex_standards": "VERIFIED (100% pattern matching with schema regex)",
-    "date_ordering": "VERIFIED (start_date <= end_date across all tables)",
-    "demand_coverage_12m": "VERIFIED (All 52 weeks covered in forward demand)",
-    "arithmetic_reconciliation": "VERIFIED (shortage = max(0, required - available); net_capacity reconciled)",
-    "leave_capacity_reconciliation": "VERIFIED (Approved leave properly reduces available capacity)",
+  "timestamp": "2026-11-11T15:52:57.549634",
+  "scale": "starter",
+  "seed": 20261022,
+  "error_count": 0,
+  "errors": [],
+  "checks_performed": {
+    "primary_key_uniqueness": "PASS",
+    "foreign_key_integrity": "PASS",
+    "enum_constraints": "PASS",
+    "date_ordering": "PASS",
+    "project_demand_bounds": "PASS",
+    "demand_coverage_53_weeks": "PASS",
+    "gap_arithmetic_consistency": "PASS",
     "edge_cases_labeled": "VERIFIED (4 anomalies labeled in ground_truth)"
   },
-  "checksum_sha256": "482d54e65f4b247318abcdd34824a43ee109e5dac72d464a5799a30bd87ef651"
+  "intentional_anomaly_flags": [
+    "[EC-2] STALE_SKILL_ACTIVE on ESK-000001: STALE_PROFICIENCY",
+    "[EC-3] DEMAND_DOUBLE_COUNTED on DEM-PRJ-2026-000001-2026W23-99: DUPLICATE_DEMAND",
+    "[EC-1] OVER_ALLOCATED on ALLOC-2026-000049: ALLOCATION_EXCEEDS_CAPACITY",
+    "[EC-4] OVERLAPPING_ALLOCATION on ALLOC-2026-000050: DATE_OVERLAP_CONFLICT"
+  ],
+  "dataset_checksum_sha256": "5126d72ce3f89f964148e92f65e54fa1b6e3f906eb0c2daf225a26edcd39c835"
 }

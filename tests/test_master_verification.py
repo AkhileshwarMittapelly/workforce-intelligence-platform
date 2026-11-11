@@ -128,3 +128,215 @@ def test_deterministic_reproducibility():
         chk2 = gen2.checksum()
 
         assert chk1 == chk2, f"Checksum mismatch between identical runs: {chk1} != {chk2}"
+
+
+def test_demand_coverage_53_iso_weeks():
+    """Verify all 53 ISO weeks for 2026 are covered, demand IDs match ISO week, and fall within project bounds."""
+    dp_file = DATA_DIR / "demand_plans.csv"
+    prj_file = DATA_DIR / "projects.csv"
+    assert dp_file.exists() and prj_file.exists()
+
+    dp_df = pd.read_csv(dp_file)
+    prj_df = pd.read_csv(prj_file)
+
+    # 1. All 53 ISO weeks must be present in demand (derived from start_date)
+    iso_weeks_present = set(pd.to_datetime(dp_df["start_date"]).dt.isocalendar().week)
+    assert len(iso_weeks_present) == 53, f"Expected 53 weeks, got {len(iso_weeks_present)}"
+    assert set(range(1, 54)) == iso_weeks_present
+
+    # 2. Demand plan ID format matches year and week (except injected duplicate -99)
+    for _, row in dp_df.iterrows():
+        did = str(row["demand_id"])
+        dt = pd.to_datetime(row["start_date"])
+        iso_wk = dt.isocalendar().week
+        iso_yr = dt.isocalendar().year
+        if did.endswith("-99"):
+            continue
+        # Expected e.g. DEM-PRJ-2026-000001-2026W23
+        expected_tag = f"{iso_yr}W{iso_wk:02d}"
+        assert expected_tag in did, f"Demand ID {did} does not match expected week tag {expected_tag}"
+
+    # 3. Project date coverage
+    prj_dates = prj_df.set_index("project_id")[["start_date", "end_date"]].to_dict(orient="index")
+    for _, row in dp_df.iterrows():
+        pid = row["project_id"]
+        if pid in prj_dates:
+            p_s = str(prj_dates[pid]["start_date"])
+            p_e = str(prj_dates[pid]["end_date"])
+            d_s = str(row["start_date"])
+            d_e = str(row["end_date"])
+            assert d_s >= p_s, f"Demand starts before project: {d_s} < {p_s}"
+            assert d_e <= p_e, f"Demand ends after project: {d_e} > {p_e}"
+
+
+def test_anomaly_detection_false_positives_and_edge_cases():
+    """Test anomaly detection handles sequential allocations (no false positive), multiple overlaps, and empty/NaN data."""
+    from src.services.anomaly_service import _detect_ec1_over_allocated, _detect_ec4_overlapping_assignments
+
+    # 1. Sequential non-overlapping allocations: 60% Jan-Feb, 60% Mar-Apr (Sum=120% lifetime, but max concurrent=60%)
+    seq_allocs = pd.DataFrame([
+        {
+            "allocation_id": "ALLOC-TEST-001",
+            "employee_id": "EMP-TEST-001",
+            "project_id": "PRJ-001",
+            "start_date": "2026-01-01",
+            "end_date": "2026-02-28",
+            "allocation_percentage": 60,
+        },
+        {
+            "allocation_id": "ALLOC-TEST-002",
+            "employee_id": "EMP-TEST-001",
+            "project_id": "PRJ-002",
+            "start_date": "2026-03-01",
+            "end_date": "2026-04-30",
+            "allocation_percentage": 60,
+        },
+    ])
+    ec1_anomalies = _detect_ec1_over_allocated(seq_allocs)
+    assert len(ec1_anomalies) == 0, "Sequential non-overlapping allocations must NOT trigger EC-1 false positive"
+
+    # 2. Overlapping concurrent allocations: 60% Jan-Mar, 60% Feb-Apr (Concurrent in Feb-Mar = 120%)
+    concurrent_allocs = pd.DataFrame([
+        {
+            "allocation_id": "ALLOC-TEST-003",
+            "employee_id": "EMP-TEST-002",
+            "project_id": "PRJ-001",
+            "start_date": "2026-01-01",
+            "end_date": "2026-03-31",
+            "allocation_percentage": 60,
+        },
+        {
+            "allocation_id": "ALLOC-TEST-004",
+            "employee_id": "EMP-TEST-002",
+            "project_id": "PRJ-002",
+            "start_date": "2026-02-01",
+            "end_date": "2026-04-30",
+            "allocation_percentage": 60,
+        },
+    ])
+    ec1_detected = _detect_ec1_over_allocated(concurrent_allocs)
+    assert len(ec1_detected) == 1, "Concurrent allocations exceeding 100% must trigger EC-1"
+
+    # 3. Multiple overlaps: 1 long allocation spanning Jan-Jun overlapping two different allocations (Feb and May)
+    multi_overlap_allocs = pd.DataFrame([
+        {
+            "allocation_id": "ALLOC-LONG",
+            "employee_id": "EMP-TEST-003",
+            "project_id": "PRJ-001",
+            "start_date": "2026-01-01",
+            "end_date": "2026-06-30",
+            "allocation_percentage": 40,
+        },
+        {
+            "allocation_id": "ALLOC-SHORT-1",
+            "employee_id": "EMP-TEST-003",
+            "project_id": "PRJ-002",
+            "start_date": "2026-02-01",
+            "end_date": "2026-02-28",
+            "allocation_percentage": 40,
+        },
+        {
+            "allocation_id": "ALLOC-SHORT-2",
+            "employee_id": "EMP-TEST-003",
+            "project_id": "PRJ-003",
+            "start_date": "2026-05-01",
+            "end_date": "2026-05-31",
+            "allocation_percentage": 40,
+        },
+    ])
+    ec4_detected = _detect_ec4_overlapping_assignments(multi_overlap_allocs)
+    # ALLOC-LONG overlaps ALLOC-SHORT-1 AND ALLOC-LONG overlaps ALLOC-SHORT-2 => 2 anomaly records
+    assert len(ec4_detected) == 2, f"Expected 2 overlapping pair conflicts, got {len(ec4_detected)}"
+
+    # 4. Graceful handling of empty and NaN dates
+    empty_df = pd.DataFrame()
+    assert _detect_ec1_over_allocated(empty_df) == []
+    assert _detect_ec4_overlapping_assignments(empty_df) == []
+
+    nan_dates_df = pd.DataFrame([
+        {
+            "allocation_id": "ALLOC-NAN-1",
+            "employee_id": "EMP-TEST-004",
+            "project_id": "PRJ-001",
+            "start_date": None,
+            "end_date": None,
+            "allocation_percentage": 50,
+        },
+        {
+            "allocation_id": "ALLOC-NAN-2",
+            "employee_id": "EMP-TEST-004",
+            "project_id": "PRJ-002",
+            "start_date": None,
+            "end_date": None,
+            "allocation_percentage": 50,
+        },
+    ])
+    assert _detect_ec4_overlapping_assignments(nan_dates_df) == []
+
+
+def test_period_specific_forecasting_with_leave_and_overlap():
+    """Test period-specific supply calculation, leave deductions, and multi-demand capacity tracking."""
+    from src.services.forecast_service import _compute_forecasts
+
+    emp_df = pd.DataFrame([
+        {"employee_id": "EMP-001", "fte": 1.0, "status": "ACTIVE"},
+        {"employee_id": "EMP-002", "fte": 1.0, "status": "ACTIVE"},
+    ])
+    skills_df = pd.DataFrame([
+        {"employee_id": "EMP-001", "skill_id": "SKL-001", "proficiency_level": 4, "last_evaluated_date": "2026-10-01"},
+        {"employee_id": "EMP-002", "skill_id": "SKL-001", "proficiency_level": 4, "last_evaluated_date": "2026-10-01"},
+    ])
+    # EMP-001 is allocated 0.5 FTE during 2026-W05
+    alloc_df = pd.DataFrame([
+        {
+            "allocation_id": "AL-1",
+            "employee_id": "EMP-001",
+            "start_date": "2026-01-26",
+            "end_date": "2026-02-08",
+            "allocation_percentage": 50,
+        }
+    ])
+    # EMP-002 has 40 hours approved leave during 2026-W05 (100% capacity reduction)
+    leave_df = pd.DataFrame([
+        {
+            "leave_id": "LV-1",
+            "employee_id": "EMP-002",
+            "start_date": "2026-01-26",
+            "end_date": "2026-02-01",
+            "leave_hours": 40.0,
+            "approval_status": "APPROVED",
+        }
+    ])
+    # Demand requires 1.0 FTE for SKL-001 in week 2026-W05
+    demand_df = pd.DataFrame([
+        {
+            "demand_id": "DP-001",
+            "required_skill_id": "SKL-001",
+            "role_id": "ROL-001",
+            "required_fte": 1.0,
+            "min_proficiency_level": 3,
+            "week_number": "2026-W05",
+            "period_start": "2026-01-26",
+            "period_end": "2026-02-01",
+        }
+    ])
+
+    results = _compute_forecasts(
+        demand_df=demand_df,
+        employees_df=emp_df,
+        employee_skills_df=skills_df,
+        allocations_df=alloc_df,
+        leave_events_df=leave_df,
+        granularity="week",
+    )
+
+    assert len(results) == 1
+    res = results[0]
+    # EMP-001 has 1.0 - 0.5 = 0.5 FTE available
+    # EMP-002 has 1.0 - 1.0 = 0.0 FTE available
+    # Total supply = 0.5 FTE. Demand = 1.0 FTE. Gap = 0.5 FTE. Utilization = 200% -> capped at 150% -> CRITICAL
+    assert res.supply_fte == 0.5
+    assert res.demand_fte == 1.0
+    assert res.gap_fte == 0.5
+    assert res.risk_level == "CRITICAL"
+

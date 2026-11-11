@@ -8,10 +8,10 @@
   },
   {
     "issue_type": "DEMAND_DOUBLE_COUNTED",
-    "entity_id": "DEM-PRJ-2026-000001-2026W01-99",
+    "entity_id": "DEM-PRJ-2026-000001-2026W23-99",
     "expected_flag": "DUPLICATE_DEMAND",
     "edge_case_label": "EC-3",
-    "detail": "Duplicate demand: same project=PRJ-2026-000001, role=ROL-0010, week=1 as DEM-PRJ-2026-000001-2026W13"
+    "detail": "Duplicate demand: same project=PRJ-2026-000001, role=ROL-0004, skill=SKL-000030, start_date=2026-06-01, end_date=2026-06-07 as DEM-PRJ-2026-000001-2026W23"
   },
   {
     "issue_type": "OVER_ALLOCATED",

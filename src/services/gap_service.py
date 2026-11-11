@@ -139,18 +139,15 @@ def _compute_gap_recommendations(
     allocations_df: pd.DataFrame,
     projects_df: Optional[pd.DataFrame] = None,
     gap_analyses_df: Optional[pd.DataFrame] = None,
+    leave_events_df: Optional[pd.DataFrame] = None,
     period_start: Optional[date] = None,
     period_end: Optional[date] = None,
 ) -> list[GapRecommendation]:
     """
-    Derive GapRecommendation list from DataFrames.
-
-    Priority logic (see _recommend_action for details):
-    shortage > 5 AND proficiency_gap > 2 → HIRE_EXTERNAL
-    shortage > 2 AND bench available     → REASSIGN_BENCH
-    shortage 1-2 AND training available  → UPSKILL_INTERNAL
-    critical priority project             → ENGAGE_CONTRACTOR
-    else                                  → CROSS_TRAIN
+    Derive GapRecommendation list from DataFrames using consistent FTE accounting.
+    Excludes inactive employees and stale skills (>18 months).
+    Calculates bench capacity using date-overlapping allocations and approved leave
+    during the relevant demand period, avoiding double-counting across demands.
     """
     if demand_df.empty:
         return []
@@ -167,6 +164,13 @@ def _compute_gap_recommendations(
         gap_analyses_df = gap_analyses_df.copy()
         gap_analyses_df.columns = [c.strip().lower() for c in gap_analyses_df.columns]
 
+    # Load leave events if not passed
+    if leave_events_df is None or leave_events_df.empty:
+        leave_events_df = _load_csv("leave_events.csv")
+    if not leave_events_df.empty:
+        leave_events_df = leave_events_df.copy()
+        leave_events_df.columns = [c.strip().lower() for c in leave_events_df.columns]
+
     # Date filtering on demand
     start_c = "start_date" if "start_date" in demand_df.columns else ("period_start" if "period_start" in demand_df.columns else None)
     end_c = "end_date" if "end_date" in demand_df.columns else ("period_end" if "period_end" in demand_df.columns else None)
@@ -182,49 +186,57 @@ def _compute_gap_recommendations(
     if demand_df.empty:
         return []
 
-    # --- Active employees ---
+    # --- 1. Active employees only ---
     if not employees_df.empty and "status" in employees_df.columns:
-        active_emp = employees_df[employees_df["status"].str.upper() == "ACTIVE"]
+        active_emp = employees_df[employees_df["status"].str.upper() == "ACTIVE"].copy()
     else:
-        active_emp = employees_df
+        active_emp = employees_df.copy()
 
-    # --- Skill lookup ---
-    skill_col_emp = "skill_id" if "skill_id" in employee_skills_df.columns else None
+    emp_contracted_map = dict(
+        zip(active_emp["employee_id"], active_emp["fte"].astype(float))
+    ) if "fte" in active_emp.columns else {e: 1.0 for e in active_emp.get("employee_id", [])}
 
-    if skill_col_emp and not employee_skills_df.empty:
-        skill_lookup = employee_skills_df[
-            [c for c in ["employee_id", "skill_id", "proficiency_level"] if c in employee_skills_df.columns]
+    # --- 2. Valid and non-stale skills only ---
+    if not employee_skills_df.empty:
+        es_valid = employee_skills_df[employee_skills_df["status"].str.upper() == "ACTIVE"].copy() if "status" in employee_skills_df.columns else employee_skills_df.copy()
+        if "last_evaluated_date" in es_valid.columns:
+            eval_dt = pd.to_datetime(es_valid["last_evaluated_date"], errors="coerce")
+            scenario_dt = pd.Timestamp("2026-11-11")
+            es_valid = es_valid[(scenario_dt - eval_dt).dt.days <= 548]  # exclude > 18 months stale
+        skill_lookup = es_valid[
+            [c for c in ["employee_id", "skill_id", "proficiency_level"] if c in es_valid.columns]
         ].copy()
         if "proficiency_level" not in skill_lookup.columns:
             skill_lookup["proficiency_level"] = 3
     else:
         skill_lookup = pd.DataFrame(columns=["employee_id", "skill_id", "proficiency_level"])
 
-    # --- Bench employees: low allocation ---
-    if not allocations_df.empty:
-        alloc_col = next((c for c in ("allocation_percentage", "allocated_fte", "allocation_pct", "fte") if c in allocations_df.columns), None)
-        if alloc_col and "employee_id" in allocations_df.columns:
-            alloc_temp = allocations_df.copy()
-            if alloc_col == "allocation_percentage":
-                alloc_temp["_alloc_rate"] = alloc_temp[alloc_col].astype(float) / 100.0
-            else:
-                alloc_temp["_alloc_rate"] = alloc_temp[alloc_col].astype(float)
-
-            emp_alloc_sum = (
-                alloc_temp.groupby("employee_id")["_alloc_rate"]
-                .sum()
-                .reset_index()
-                .rename(columns={"_alloc_rate": "total_alloc"})
-            )
-            bench_emp_ids = set(
-                emp_alloc_sum[emp_alloc_sum["total_alloc"] < 0.5]["employee_id"].tolist()
-            )
+    # --- 3. Clean allocations with dates ---
+    alloc_clean = allocations_df.copy() if not allocations_df.empty else pd.DataFrame()
+    if not alloc_clean.empty:
+        alloc_clean["_s"] = pd.to_datetime(alloc_clean.get("start_date"), errors="coerce")
+        alloc_clean["_e"] = pd.to_datetime(alloc_clean.get("end_date"), errors="coerce")
+        if "allocation_percentage" in alloc_clean.columns:
+            alloc_clean["_fte"] = alloc_clean["allocation_percentage"].astype(float) / 100.0
+        elif "allocated_fte" in alloc_clean.columns:
+            alloc_clean["_fte"] = alloc_clean["allocated_fte"].astype(float)
         else:
-            bench_emp_ids = set(active_emp["employee_id"].tolist()) if not active_emp.empty else set()
-    else:
-        bench_emp_ids = set(active_emp["employee_id"].tolist()) if not active_emp.empty else set()
+            alloc_clean["_fte"] = 0.5
 
-    # --- Critical priority projects ---
+    # --- 4. Clean approved leave with dates ---
+    leave_clean = pd.DataFrame()
+    if not leave_events_df.empty:
+        app_col = "approval_status" if "approval_status" in leave_events_df.columns else None
+        if app_col:
+            leave_clean = leave_events_df[leave_events_df[app_col].str.upper() == "APPROVED"].copy()
+        else:
+            leave_clean = leave_events_df.copy()
+        if not leave_clean.empty:
+            leave_clean["_s"] = pd.to_datetime(leave_clean.get("start_date"), errors="coerce")
+            leave_clean["_e"] = pd.to_datetime(leave_clean.get("end_date"), errors="coerce")
+            leave_clean["_fte"] = (leave_clean.get("leave_hours", 0.0).astype(float) / 40.0).clip(upper=1.0)
+
+    # --- 5. Critical priority projects ---
     critical_project_ids: set = set()
     if projects_df is not None and not projects_df.empty:
         priority_col = next((c for c in ("priority", "project_priority") if c in projects_df.columns), None)
@@ -233,7 +245,7 @@ def _compute_gap_recommendations(
             crit = projects_df[projects_df[priority_col].str.upper() == "CRITICAL"]
             critical_project_ids = set(crit[proj_id_col].tolist())
 
-    # --- Process each demand row ---
+    # --- 6. Process each demand group ---
     skill_demand_col = next(
         (c for c in ("required_skill_id", "skill_id") if c in demand_df.columns), None
     )
@@ -258,69 +270,93 @@ def _compute_gap_recommendations(
     ).reset_index()
 
     recommendations: list[GapRecommendation] = []
+    consumed_emp_capacity: dict[tuple, float] = {}
 
     for _, row in demand_grp.iterrows():
         skill_id = str(row[skill_demand_col]) if skill_demand_col else "UNKNOWN"
         role_id = str(row[role_col]) if role_col and role_col in row.index else "UNKNOWN"
         project_id = str(row[proj_col]) if proj_col and proj_col in row.index else "UNKNOWN"
         demand_fte = float(row["demand_fte"])
-
         req_prof = int(row["req_prof"]) if req_prof_col and "req_prof" in row.index else 1
 
-        # Supply: qualified employees' available FTE
+        ps_ts = pd.to_datetime(row.get("period_start"))
+        pe_ts = pd.to_datetime(row.get("period_end"))
+
+        # Qualified active employees
         if not skill_lookup.empty:
-            qualified_emps = skill_lookup[
+            qualified_es = skill_lookup[
                 (skill_lookup["skill_id"] == skill_id)
                 & (skill_lookup["proficiency_level"].fillna(1) >= req_prof)
             ]
+            active_ids = set(active_emp["employee_id"].tolist()) if not active_emp.empty else set()
+            qualified_emp_ids = set(qualified_es["employee_id"]).intersection(active_ids)
+            avg_prof = float(qualified_es["proficiency_level"].mean()) if not qualified_es.empty else 0.0
         else:
-            qualified_emps = pd.DataFrame(columns=["employee_id", "skill_id", "proficiency_level"])
-
-        # Intersect with active employees
-        if not active_emp.empty and not qualified_emps.empty:
-            active_ids = set(active_emp["employee_id"].tolist())
-            qualified_emps = qualified_emps[qualified_emps["employee_id"].isin(active_ids)]
-
-        qualified_count = len(qualified_emps)
-
-        # Average proficiency of qualified employees (for gap calc)
-        if not qualified_emps.empty and "proficiency_level" in qualified_emps.columns:
-            avg_prof = float(qualified_emps["proficiency_level"].mean())
-        else:
+            qualified_emp_ids = set()
             avg_prof = 0.0
 
         proficiency_gap = max(0.0, req_prof - avg_prof)
 
-        # Bench check: any qualified employee on bench?
-        if not qualified_emps.empty:
-            bench_qualified = qualified_emps["employee_id"].isin(bench_emp_ids).any()
-        else:
-            bench_qualified = len(bench_emp_ids) > 0  # generic bench
+        # Period-specific bench capacity across qualified employees
+        qualified_supply_fte = 0.0
+        bench_available = False
 
-        shortage = max(0.0, demand_fte - qualified_count)
+        for emp_id in qualified_emp_ids:
+            contracted = emp_contracted_map.get(emp_id, 1.0)
+            # Overlapping allocations
+            if not alloc_clean.empty and pd.notna(ps_ts) and pd.notna(pe_ts):
+                emp_allocs = alloc_clean[
+                    (alloc_clean["employee_id"] == emp_id)
+                    & (alloc_clean["_s"] <= pe_ts)
+                    & (alloc_clean["_e"] >= ps_ts)
+                ]
+                committed_fte = float(emp_allocs["_fte"].sum())
+            else:
+                committed_fte = 0.0
 
-        # Training time heuristic: if shortage <= 2 and period allows > 4 weeks
+            # Overlapping leave
+            if not leave_clean.empty and pd.notna(ps_ts) and pd.notna(pe_ts):
+                emp_leaves = leave_clean[
+                    (leave_clean["employee_id"] == emp_id)
+                    & (leave_clean["_s"] <= pe_ts)
+                    & (leave_clean["_e"] >= ps_ts)
+                ]
+                leave_fte = float(emp_leaves["_fte"].sum())
+            else:
+                leave_fte = 0.0
+
+            net_avail = max(0.0, contracted - committed_fte - leave_fte)
+            cap_key = (emp_id, ps_ts, pe_ts)
+            already_used = consumed_emp_capacity.get(cap_key, 0.0)
+            remaining_usable = max(0.0, net_avail - already_used)
+
+            if remaining_usable > 0:
+                bench_available = True
+                alloc_to_demand = min(remaining_usable, max(0.0, demand_fte - qualified_supply_fte))
+                qualified_supply_fte += alloc_to_demand
+                consumed_emp_capacity[cap_key] = already_used + alloc_to_demand
+
+        # FTE shortage (never compare headcount to FTE)
+        shortage = max(0.0, demand_fte - qualified_supply_fte)
+
         training_time_available = False
-        if "period_start" in demand_df.columns and not demand_df.empty:
-            ps = row.get("period_start")
-            pe = row.get("period_end")
-            if pd.notna(ps) and pd.notna(pe):
-                weeks = (pd.Timestamp(pe) - pd.Timestamp(ps)).days / 7
-                training_time_available = weeks >= 4
+        if pd.notna(ps_ts) and pd.notna(pe_ts):
+            weeks = (pe_ts - ps_ts).days / 7
+            training_time_available = weeks >= 4
 
         is_critical = project_id in critical_project_ids
-
         severity = _gap_severity(shortage)
+
         action, reasoning = _recommend_action(
             shortage=shortage,
             proficiency_gap=proficiency_gap,
-            bench_available=bool(bench_qualified),
+            bench_available=bench_available,
             training_time_available=training_time_available,
             is_critical_priority=is_critical,
         )
 
-        ps_date = row["period_start"].date() if "period_start" in row.index and pd.notna(row.get("period_start")) else period_start
-        pe_date = row["period_end"].date() if "period_end" in row.index and pd.notna(row.get("period_end")) else period_end
+        ps_date = ps_ts.date() if pd.notna(ps_ts) else period_start
+        pe_date = pe_ts.date() if pd.notna(pe_ts) else period_end
 
         rec = GapRecommendation(
             gap_analysis_id=f"GAP-{uuid.uuid4().hex[:8].upper()}",
@@ -336,7 +372,6 @@ def _compute_gap_recommendations(
         )
         recommendations.append(rec)
 
-    # Sort: highest severity first
     recommendations.sort(key=lambda r: _SEVERITY_ORDER.get(r.gap_severity, 99))
     return recommendations
 
@@ -360,6 +395,7 @@ def analyze_gaps_csv(
     employee_skills_df = _load_csv("employee_skills.csv")
     allocations_df = _load_csv("allocations.csv")
     projects_df = _load_csv("projects.csv")
+    leave_events_df = _load_csv("leave_events.csv")
 
     return _compute_gap_recommendations(
         demand_df=demand_df,
@@ -367,6 +403,7 @@ def analyze_gaps_csv(
         employee_skills_df=employee_skills_df,
         allocations_df=allocations_df,
         projects_df=projects_df,
+        leave_events_df=leave_events_df,
         period_start=period_start,
         period_end=period_end,
     )

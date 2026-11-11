@@ -181,19 +181,21 @@ All primary keys enforce deterministic, structured identifier patterns validated
 The synthetic data generator (`src/generators/synthetic_data_generator.py`) generates realistic enterprise workforce data deterministically using seed `20261022`.
 
 ### Supported Scales:
-- **Starter Scale** (`--scale starter`): 50 employees, 30 skills, 20 projects, 15 roles.
-- **Enterprise Scale** (`--scale full`): 5,000 employees, 300 skills, 500 projects, 12 months demand.
+- **Starter Scale** (`--scale starter`): 50 employees, 30 skills, 20 projects, 15 roles, 84 demand plans covering all 53 ISO weeks (`2026-W01` to `2026-W53`).
+  - **Deterministic SHA-256 Checksum**: `5126d72ce3f89f964148e92f65e54fa1b6e3f906eb0c2daf225a26edcd39c835`
+- **Enterprise Scale** (`--scale full`): 5,000 employees, 300 skills, 500 projects, 30 roles, 25,629 demand plans covering the entire 2026 calendar year (53 ISO weeks), 9,678 leave events, 4,750 allocations, 4,836 availability records, 25,629 gap analysis records, 5,000 training enrollments, and 5,893 historical event logs.
+  - **Deterministic SHA-256 Checksum**: `47a31550a87b52790cbe4a0ab5defbd09ece9d2519c1550ffa296cf3f0c8538b` (verified in 91.90s, 0 validation errors, status: `PASSED`).
 
 ### Labeled Negative Scenarios (Ground Truth):
 The generator injects 4 deliberate anomalies and logs them to `data/ground_truth.json` for evaluator benchmarking:
 1. **EC-1: Allocation exceeds availability (`OVER_ALLOCATED`)**:
-   Employee assigned 50.0 hours on a 40.0-hour contracted capacity (`ALLOC-2026-000049`).
+   Employee assigned 125% allocation percentage exceeding contracted capacity (`ALLOC-2026-000049`).
 2. **EC-2: Skill proficiency stale but treated current (`STALE_SKILL_ACTIVE`)**:
    Active employee rating with an evaluation date $>18$ months old (`ESK-000001`), surfacing an alert banner on the Skill Matrix dashboard.
 3. **EC-3: Demand double-counted (`DEMAND_DOUBLE_COUNTED`)**:
-   Duplicate demand entries for the same project, role, and schedule week (`DEM-PRJ-2026-000001-2026W01-99`).
+   Duplicate demand entries for the same project, role, skill, and period window (`DEM-PRJ-2026-000001-2026W23-99`).
 4. **EC-4: Overlapping project allocations (`OVERLAPPING_ALLOCATION`)**:
-   Employee assigned to simultaneous active client commitments creating a schedule conflict (`ALLOC-2026-000050` & `ALLOC-2026-000051`).
+   Employee assigned to simultaneous active client commitments across different projects creating a verified schedule conflict (`ALLOC-2026-000050` overlapping `ALLOC-2026-000002`).
 
 ---
 
@@ -265,7 +267,7 @@ The platform provides role-specific dashboards (`app/pages/5_Actor_Views.py`):
 
 ---
 
-## 10. Automated Test Suite (43/43 Passed)
+## 10. Automated Test Suite (46/46 Passed)
 
 ```bash
 python -m pytest tests/ -v
@@ -274,16 +276,16 @@ python -m pytest tests/ -v
 ```text
 ============================= test session starts =============================
 platform win32 -- Python 3.11.0, pytest-9.2.0, pluggy-1.7.0
-rootdir: C:\CandidateWorkspace\workforce-intelligence-platform
+rootdir: C:\Users\svija\OneDrive\Desktop\workforce-intelligence-platform
 
 tests/test_capacity_service.py ......                                    [ 13%]
-tests/test_data_generator.py ....                                        [ 23%]
-tests/test_db_connection.py .......                                      [ 39%]
-tests/test_id_generator.py ................                              [ 76%]
-tests/test_master_verification.py .....                                  [ 88%]
+tests/test_data_generator.py ....                                        [ 21%]
+tests/test_db_connection.py .......                                      [ 36%]
+tests/test_id_generator.py ................                              [ 71%]
+tests/test_master_verification.py ........                                [ 89%]
 tests/test_services.py .....                                             [100%]
 
-============================== 43 passed in 4.72s ==============================
+============================== 46 passed in 5.61s ==============================
 ```
 
 - **Capacity & Availability Logic**: 6 tests verifying FTE scaling, approved leave, and bench math.
@@ -291,7 +293,15 @@ tests/test_services.py .....                                             [100%]
 - **Database Connection & Fallback**: 7 tests verifying URL encoding, pooling, and graceful error handling.
 - **Data Generator & Integrity**: 4 tests verifying foreign keys, 4 edge cases, and arithmetic consistency.
 - **Forecasting & Analytics Services**: 5 tests verifying risk scoring, gap diagnostics, and executive KPIs.
-- **Master Verification Suite**: 5 tests covering leave event integrity, historical event log JSON validation, anomaly detection 100% Precision/Recall/F1 benchmark, 305 unique skills taxonomy, and deterministic two-run reproducibility (SHA-256).
+- **Master Verification Suite**: 8 tests covering:
+  - Leave event integrity and contracted capacity deductions.
+  - Historical event log JSON validation and audit trail consistency.
+  - Anomaly detection 100% Precision/Recall/F1 benchmark on injected ground truth.
+  - 300+ unique skills taxonomy across 8 professional domains.
+  - Two-run deterministic reproducibility verification via SHA-256 checksum comparison.
+  - Full 2026 ISO week coverage (all 53 ISO weeks from `2026-W01` to `2026-W53`) and project date containment.
+  - Anomaly detection edge cases (eliminating false positives on sequential allocations, detecting multiple simultaneous project overlap pairs, and robust empty/null date handling).
+  - Period-specific forecasting with active allocations, approved leave deductions, and multi-demand capacity tracking.
 
 ---
 
@@ -301,12 +311,15 @@ The platform includes an independent anomaly detection engine (`src/services/ano
 
 | Edge Case | Detection Method | Entity Detected | Precision | Recall | F1 |
 |---|---|---|---|---|---|
-| **EC-1**: Over-Allocated | Sum allocation % per employee > 100% | `ALLOC-2026-000049` | 100% | 100% | 100% |
+| **EC-1**: Over-Allocated | Concurrent active allocation % > 100% contracted capacity | `ALLOC-2026-000049` | 100% | 100% | 100% |
 | **EC-2**: Stale Skill Active | Active skill with eval date > 18 months | `ESK-000001` | 100% | 100% | 100% |
-| **EC-3**: Demand Double-Counted | Duplicate (project, role, skill, period) | `DEM-PRJ-2026-000001-2026W01-99` | 100% | 100% | 100% |
-| **EC-4**: Overlapping Allocation | Same employee, overlapping date ranges, different projects | `ALLOC-2026-000050` | 100% | 100% | 100% |
+| **EC-3**: Demand Double-Counted | Duplicate (project, role, skill, start_date, end_date) | `DEM-PRJ-2026-000001-2026W23-99` | 100% | 100% | 100% |
+| **EC-4**: Overlapping Allocation | All pairs: same employee, overlapping dates, different projects | `ALLOC-2026-000050` | 100% | 100% | 100% |
 
-**Overall**: Precision = 100%, Recall = 100%, F1 = 100% (4/4 true positives, 0 false positives, 0 false negatives).
+**Benchmark Results**: Precision = 100%, Recall = 100%, F1 = 100% (4/4 true positives, 0 false positives, 0 false negatives on the injected reference ground truth).
+
+> [!NOTE]
+> **Important Evaluation Scope**: The 100% precision, recall, and F1 metrics apply specifically to the 4 synthetic benchmark edge-case scenarios injected into `data/ground_truth.json` for deterministic evaluator verification. In real-world enterprise environments with noisy human inputs, partial data entries, and unrecorded exceptions, empirical accuracy metrics will vary based on data cleanliness and policy adherence. The detection algorithms have been hardened against common production edge cases (e.g., sequential non-overlapping allocations, multiple concurrent project overlaps, and null date inputs).
 
 ---
 
