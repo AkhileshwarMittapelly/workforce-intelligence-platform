@@ -134,6 +134,8 @@ def reconcile_employee_period_capacity(
     allocations_df: Optional[pd.DataFrame] = None,
     leave_events_df: Optional[pd.DataFrame] = None,
     base_hours: float = 40.0,
+    emp_allocations: Optional[list[dict]] = None,
+    emp_leaves: Optional[list[dict]] = None,
 ) -> Dict[str, Any]:
     """
     Source-driven reconciliation for an individual employee during a specific period.
@@ -144,7 +146,13 @@ def reconcile_employee_period_capacity(
 
     # 1. Reconcile approved leave hours during period
     leave_hours = 0.0
-    if leave_events_df is not None and not leave_events_df.empty:
+    if emp_leaves is not None:
+        for l_item in emp_leaves:
+            s = l_item.get("_s")
+            e = l_item.get("_e")
+            if (s is None or s <= pe_ts) and (e is None or e >= ps_ts):
+                leave_hours += float(l_item.get("leave_hours", 0.0))
+    elif leave_events_df is not None and not leave_events_df.empty:
         l_df = leave_events_df.copy()
         l_df.columns = [c.strip().lower() for c in l_df.columns]
         app_col = next((c for c in ("approval_status", "status") if c in l_df.columns), None)
@@ -154,18 +162,33 @@ def reconcile_employee_period_capacity(
         if not l_df.empty and "start_date" in l_df.columns and "end_date" in l_df.columns:
             l_df["_s"] = pd.to_datetime(l_df["start_date"], errors="coerce")
             l_df["_e"] = pd.to_datetime(l_df["end_date"], errors="coerce")
-            emp_leaves = l_df[
+            emp_leaves_df = l_df[
                 (l_df["employee_id"] == employee_id)
                 & (l_df["_s"] <= pe_ts)
                 & (l_df["_e"] >= ps_ts)
             ]
-            if not emp_leaves.empty:
-                leave_hours = float(emp_leaves["leave_hours"].astype(float).sum())
+            if not emp_leaves_df.empty:
+                leave_hours = float(emp_leaves_df["leave_hours"].astype(float).sum())
 
     # 2. Reconcile allocated hours during period
     allocated_hours = 0.0
     allocation_ids = []
-    if allocations_df is not None and not allocations_df.empty:
+    contracted_hrs = base_hours * fte
+
+    if emp_allocations is not None:
+        for a_item in emp_allocations:
+            s = a_item.get("_s")
+            e = a_item.get("_e")
+            if (s is None or s <= pe_ts) and (e is None or e >= ps_ts):
+                if a_item.get("allocation_id"):
+                    allocation_ids.append(a_item["allocation_id"])
+                if "allocation_percentage" in a_item and pd.notna(a_item["allocation_percentage"]):
+                    allocated_hours += float(a_item["allocation_percentage"]) / 100.0 * contracted_hrs
+                elif "allocated_fte" in a_item and pd.notna(a_item["allocated_fte"]):
+                    allocated_hours += float(a_item["allocated_fte"]) * 40.0
+                elif "allocated_hours" in a_item and pd.notna(a_item["allocated_hours"]):
+                    allocated_hours += float(a_item["allocated_hours"])
+    elif allocations_df is not None and not allocations_df.empty:
         a_df = allocations_df.copy()
         a_df.columns = [c.strip().lower() for c in a_df.columns]
         if "start_date" in a_df.columns and "end_date" in a_df.columns:
@@ -178,7 +201,6 @@ def reconcile_employee_period_capacity(
             ]
             if not emp_allocs.empty:
                 allocation_ids = emp_allocs["allocation_id"].tolist()
-                contracted_hrs = base_hours * fte
                 if "allocation_percentage" in emp_allocs.columns:
                     allocated_hours = float(
                         (emp_allocs["allocation_percentage"].astype(float) / 100.0 * contracted_hrs).sum()
@@ -241,17 +263,36 @@ def reconcile_weekly_capacities_df(
     p_s_ts = pd.to_datetime(p_start)
     p_e_ts = pd.to_datetime(p_end)
     if not alloc_df.empty and "start_date" in alloc_df.columns and "end_date" in alloc_df.columns:
-        a_s = pd.to_datetime(alloc_df["start_date"], errors="coerce")
-        a_e = pd.to_datetime(alloc_df["end_date"], errors="coerce")
-        alloc_df = alloc_df[(a_s <= p_e_ts) & (a_e >= p_s_ts)].copy()
+        alloc_df.columns = [c.strip().lower() for c in alloc_df.columns]
+        alloc_df["_s"] = pd.to_datetime(alloc_df["start_date"], errors="coerce")
+        alloc_df["_e"] = pd.to_datetime(alloc_df["end_date"], errors="coerce")
+        alloc_df = alloc_df[(alloc_df["_s"] <= p_e_ts) & (alloc_df["_e"] >= p_s_ts)].copy()
+
     if not leave_df.empty and "start_date" in leave_df.columns and "end_date" in leave_df.columns:
-        l_s = pd.to_datetime(leave_df["start_date"], errors="coerce")
-        l_e = pd.to_datetime(leave_df["end_date"], errors="coerce")
-        leave_df = leave_df[(l_s <= p_e_ts) & (l_e >= p_s_ts)].copy()
+        leave_df.columns = [c.strip().lower() for c in leave_df.columns]
+        app_col = next((c for c in ("approval_status", "status") if c in leave_df.columns), None)
+        if app_col:
+            leave_df = leave_df[leave_df[app_col].astype(str).str.upper() == "APPROVED"]
+        leave_df["_s"] = pd.to_datetime(leave_df["start_date"], errors="coerce")
+        leave_df["_e"] = pd.to_datetime(leave_df["end_date"], errors="coerce")
+        leave_df = leave_df[(leave_df["_s"] <= p_e_ts) & (leave_df["_e"] >= p_s_ts)].copy()
+
+    # Pre-index allocations and leave into dicts for O(1) employee lookup
+    alloc_by_emp: dict[str, list[dict]] = {}
+    if not alloc_df.empty:
+        for r in alloc_df.to_dict(orient="records"):
+            eid = str(r.get("employee_id", ""))
+            alloc_by_emp.setdefault(eid, []).append(r)
+
+    leave_by_emp: dict[str, list[dict]] = {}
+    if not leave_df.empty:
+        for r in leave_df.to_dict(orient="records"):
+            eid = str(r.get("employee_id", ""))
+            leave_by_emp.setdefault(eid, []).append(r)
 
     records = []
     active_emps = emp_df[emp_df["status"].astype(str).str.upper() == "ACTIVE"] if "status" in emp_df.columns else emp_df
-    for _, emp in active_emps.iterrows():
+    for emp in active_emps.to_dict(orient="records"):
         eid = str(emp["employee_id"])
         fte = float(emp.get("fte", 1.0))
         rec = reconcile_employee_period_capacity(
@@ -259,9 +300,9 @@ def reconcile_weekly_capacities_df(
             fte=fte,
             period_start=p_start,
             period_end=p_end,
-            allocations_df=alloc_df,
-            leave_events_df=leave_df,
             base_hours=float(emp.get("standard_hours_per_week", 40.0)),
+            emp_allocations=alloc_by_emp.get(eid, []),
+            emp_leaves=leave_by_emp.get(eid, []),
         )
         rec["department"] = emp.get("department", "Unknown")
         rec["employee_name"] = f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip()

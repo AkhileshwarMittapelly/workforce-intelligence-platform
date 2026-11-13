@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     app_env: str = os.getenv("APP_ENV") or "development"
     app_debug: bool = os.getenv("APP_DEBUG", "True").lower() in ("true", "1", "yes")
     app_title: str = os.getenv("APP_TITLE") or "Workforce Intelligence Platform"
+    scenario_date: str = os.getenv("SCENARIO_DATE") or "2026-11-11"
 
     # Streamlit
     streamlit_server_port: int = int(os.getenv("STREAMLIT_SERVER_PORT") or 8501)

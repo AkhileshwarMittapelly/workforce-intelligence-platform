@@ -104,6 +104,7 @@ def _compute_forecasts(
     granularity: str = "week",   # "week" | "month"
     leave_events_df: Optional[pd.DataFrame] = None,
     deduplicate_demand: bool = False,
+    scenario_date: Optional[str | date | pd.Timestamp] = None,
 ) -> list[ForecastResult]:
     """
     Core logic: compute ForecastResult list from DataFrames.
@@ -119,6 +120,7 @@ def _compute_forecasts(
         granularity: "week" or "month".
         leave_events_df: Optional DataFrame of leave events (approved leave reduces capacity).
         deduplicate_demand: Whether to exclude composite duplicate demand before aggregating.
+        scenario_date: Configurable evaluation scenario date (defaults to 2026-11-11).
     """
     if demand_df.empty:
         return []
@@ -144,7 +146,6 @@ def _compute_forecasts(
     allocations_df.columns = [c.strip().lower() for c in allocations_df.columns]
 
     # Date filtering
-    # Support both start_date/end_date and period_start/period_end
     start_col = "start_date" if "start_date" in demand_df.columns else ("period_start" if "period_start" in demand_df.columns else None)
     end_col = "end_date" if "end_date" in demand_df.columns else ("period_end" if "period_end" in demand_df.columns else None)
 
@@ -183,7 +184,7 @@ def _compute_forecasts(
 
     role_col = "role_id" if "role_id" in demand_df.columns else None
 
-    # Required proficiency from demand (support min_proficiency_level & required_proficiency)
+    # Required proficiency from demand
     req_prof_col = None
     for cand in ("min_proficiency_level", "required_proficiency", "proficiency_level"):
         if cand in demand_df.columns:
@@ -212,30 +213,31 @@ def _compute_forecasts(
         fte_series = active_emp["fte"].fillna(1.0).astype(float) if "fte" in active_emp.columns else pd.Series(1.0, index=active_emp.index)
         emp_contracted_map = dict(zip(active_emp["employee_id"], fte_series))
 
-    # Build employee→skills lookup with proficiency and freshness
-    skill_cols_avail = ["employee_id", "skill_id", "proficiency_level"]
+    # Configurable scenario evaluation date
+    scenario_dt = pd.Timestamp(scenario_date) if scenario_date else pd.Timestamp("2026-11-11")
+
+    # Build pre-indexed employee->skills lookup: skill_id -> list of (emp_id, proficiency)
+    skills_by_id: dict[str, list[tuple[str, int]]] = {}
     if not employee_skills_df.empty:
-        # Filter out expired skills
-        if "status" in employee_skills_df.columns:
-            es_valid = employee_skills_df[employee_skills_df["status"].str.upper() != "EXPIRED"].copy()
-        else:
-            es_valid = employee_skills_df.copy()
+        es_valid = employee_skills_df.copy()
+        if "status" in es_valid.columns:
+            es_valid = es_valid[es_valid["status"].str.upper() != "EXPIRED"]
 
         # Check freshness: last_evaluated_date <= 548 days (18 months)
         if "last_evaluated_date" in es_valid.columns:
             eval_dt = pd.to_datetime(es_valid["last_evaluated_date"], errors="coerce")
-            scenario_dt = pd.Timestamp("2026-11-11")
             is_stale = (scenario_dt - eval_dt).dt.days > 548
             es_valid = es_valid[~is_stale]
 
-        skill_lookup = es_valid[[c for c in skill_cols_avail if c in es_valid.columns]].copy()
-        if "proficiency_level" not in skill_lookup.columns:
-            skill_lookup["proficiency_level"] = 3
-    else:
-        skill_lookup = pd.DataFrame(columns=["employee_id", "skill_id", "proficiency_level"])
+        for r in es_valid.to_dict(orient="records"):
+            sk_id = str(r.get("skill_id", ""))
+            eid = str(r.get("employee_id", ""))
+            prof = int(r.get("proficiency_level", 3)) if pd.notna(r.get("proficiency_level")) else 3
+            if eid in emp_contracted_map:
+                skills_by_id.setdefault(sk_id, []).append((eid, prof))
 
-    # Prepare allocations with date parsing and fte values
-    alloc_work = pd.DataFrame()
+    # Prepare allocations with date parsing and fte values - pre-indexed by employee_id
+    alloc_by_emp: dict[str, list[tuple[pd.Timestamp, pd.Timestamp, float]]] = {}
     if not allocations_df.empty:
         alloc_work = allocations_df.copy()
         if "allocation_percentage" in alloc_work.columns:
@@ -252,8 +254,17 @@ def _compute_forecasts(
         if "end_date" in alloc_work.columns:
             alloc_work["_e"] = pd.to_datetime(alloc_work["end_date"], errors="coerce")
 
-    # Prepare leave events with date parsing
-    leave_work = pd.DataFrame()
+        if "_s" in alloc_work.columns and "_e" in alloc_work.columns:
+            for r in alloc_work.to_dict(orient="records"):
+                eid = str(r.get("employee_id", ""))
+                s = r.get("_s")
+                e = r.get("_e")
+                fval = float(r.get("_fte_val", 0.0))
+                if pd.notna(s) and pd.notna(e):
+                    alloc_by_emp.setdefault(eid, []).append((s, e, fval))
+
+    # Prepare leave events with date parsing - pre-indexed by employee_id
+    leave_by_emp: dict[str, list[tuple[pd.Timestamp, pd.Timestamp, float]]] = {}
     if leave_events_df is not None and not leave_events_df.empty:
         leave_copy = leave_events_df.copy()
         leave_copy.columns = [c.strip().lower() for c in leave_copy.columns]
@@ -267,6 +278,14 @@ def _compute_forecasts(
             leave_work["_s"] = pd.to_datetime(leave_work.get("start_date"), errors="coerce")
             leave_work["_e"] = pd.to_datetime(leave_work.get("end_date"), errors="coerce")
             leave_work["_fte"] = (leave_work.get("leave_hours", 0.0).astype(float) / 40.0).clip(upper=1.0)
+
+            for r in leave_work.to_dict(orient="records"):
+                eid = str(r.get("employee_id", ""))
+                s = r.get("_s")
+                e = r.get("_e")
+                fval = float(r.get("_fte", 0.0))
+                if pd.notna(s) and pd.notna(e):
+                    leave_by_emp.setdefault(eid, []).append((s, e, fval))
 
     # Aggregate demand
     group_cols = ["_period", skill_col]
@@ -293,16 +312,16 @@ def _compute_forecasts(
     results: list[ForecastResult] = []
     consumed_period_capacity: dict[tuple, float] = {}
 
-    for _, row in demand_agg.iterrows():
+    for row in demand_agg.to_dict(orient="records"):
         period = str(row["_period"])
         role_id = str(row["role_id"])
         skill_id = str(row["skill_id"])
         demand_fte = float(row["demand_fte"])
-        req_prof = int(row[req_prof_col]) if req_prof_col and req_prof_col in row.index else 1
+        req_prof = int(row[req_prof_col]) if req_prof_col and req_prof_col in row else 1
 
         # Period start and end
-        ps_ts = pd.to_datetime(row.get("_dt_start")) if "_dt_start" in row.index else pd.NaT
-        pe_ts = pd.to_datetime(row.get("_dt_end")) if "_dt_end" in row.index else pd.NaT
+        ps_ts = pd.to_datetime(row.get("_dt_start")) if "_dt_start" in row else pd.NaT
+        pe_ts = pd.to_datetime(row.get("_dt_end")) if "_dt_end" in row else pd.NaT
 
         # If missing, infer from period string
         if pd.isna(ps_ts) or pd.isna(pe_ts):
@@ -322,14 +341,10 @@ def _compute_forecasts(
                     pe_ts = pd.Timestamp("2026-12-31")
 
         # Supply: qualified active employees with this skill AND proficiency >= req_prof
-        if not skill_lookup.empty and "skill_id" in skill_lookup.columns:
-            qualified_rows = skill_lookup[
-                (skill_lookup["skill_id"] == skill_id)
-                & (skill_lookup["proficiency_level"].fillna(1) >= req_prof)
-            ]
-            qualified_emp_ids = [eid for eid in qualified_rows["employee_id"].unique() if eid in emp_contracted_map]
-        else:
-            qualified_emp_ids = []
+        qualified_emp_ids = [
+            eid for eid, prof in skills_by_id.get(skill_id, [])
+            if prof >= req_prof
+        ]
 
         total_qualified_avail = 0.0
         total_already_allocated = 0.0
@@ -338,30 +353,19 @@ def _compute_forecasts(
         for emp_id in qualified_emp_ids:
             contracted = emp_contracted_map.get(emp_id, 1.0)
 
-            # Period-specific overlapping allocations
-            if not alloc_work.empty and "_s" in alloc_work.columns and "_e" in alloc_work.columns:
-                emp_allocs = alloc_work[
-                    (alloc_work["employee_id"] == emp_id)
-                    & (alloc_work["_s"] <= pe_ts)
-                    & (alloc_work["_e"] >= ps_ts)
-                ]
-                alloc_fte = float(emp_allocs["_fte_val"].sum()) if not emp_allocs.empty else 0.0
-            elif not alloc_work.empty:
-                emp_allocs = alloc_work[alloc_work["employee_id"] == emp_id]
-                alloc_fte = float(emp_allocs["_fte_val"].sum()) if not emp_allocs.empty else 0.0
-            else:
-                alloc_fte = 0.0
+            # Period-specific overlapping allocations from pre-indexed dict
+            alloc_fte = 0.0
+            if emp_id in alloc_by_emp and pd.notna(ps_ts) and pd.notna(pe_ts):
+                for s, e, fval in alloc_by_emp[emp_id]:
+                    if s <= pe_ts and e >= ps_ts:
+                        alloc_fte += fval
 
-            # Period-specific approved leave
-            if not leave_work.empty and "_s" in leave_work.columns and "_e" in leave_work.columns:
-                emp_leaves = leave_work[
-                    (leave_work["employee_id"] == emp_id)
-                    & (leave_work["_s"] <= pe_ts)
-                    & (leave_work["_e"] >= ps_ts)
-                ]
-                leave_fte = float(emp_leaves["_fte"].sum()) if not emp_leaves.empty else 0.0
-            else:
-                leave_fte = 0.0
+            # Period-specific approved leave from pre-indexed dict
+            leave_fte = 0.0
+            if emp_id in leave_by_emp and pd.notna(ps_ts) and pd.notna(pe_ts):
+                for s, e, fval in leave_by_emp[emp_id]:
+                    if s <= pe_ts and e >= ps_ts:
+                        leave_fte += fval
 
             net_avail = max(0.0, contracted - alloc_fte - leave_fte)
             total_already_allocated += min(alloc_fte, contracted)
@@ -387,16 +391,16 @@ def _compute_forecasts(
             utilization_pct = 0.0
 
         risk = _risk_level(utilization_pct)
-        forecast_id = f"FCST-{period}-{role_id}-{skill_id}"
+        forecast_id = f"FCST-{period}-{skill_id}"
 
         results.append(
             ForecastResult(
                 period=period,
                 role_id=role_id,
                 skill_id=skill_id,
-                demand_fte=round(demand_fte, 4),
-                supply_fte=round(supply_fte, 4),
-                gap_fte=round(gap_fte, 4),
+                demand_fte=round(demand_fte, 2),
+                supply_fte=round(supply_fte, 2),
+                gap_fte=round(gap_fte, 2),
                 utilization_pct=round(utilization_pct, 2),
                 risk_level=risk,
                 project_id="ALL",
@@ -404,7 +408,7 @@ def _compute_forecasts(
                 already_allocated_fte=round(total_already_allocated, 4),
                 qualified_available_fte=round(supply_fte, 4),
                 remaining_supply_fte=max(0.0, round(supply_fte - demand_fte, 4)),
-                calculation_timestamp="2026-11-11T12:00:00",
+                calculation_timestamp=datetime.now().isoformat(),
                 assumptions=f"Proficiency threshold >= {req_prof}; Active & non-stale <= 18 months; Period-specific leave & allocations",
             )
         )
@@ -822,6 +826,281 @@ def evaluate_forecast_accuracy(
         logger.warning("Could not save forecast accuracy metrics: %s", exc)
 
     return eval_result
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Advanced Time-Series Forecasting Engine
+# ---------------------------------------------------------------------------
+
+def compute_time_series_models(
+    periods: list[str],
+    values: list[float],
+    test_size: int = 12,
+    future_horizon: int = 8,
+) -> dict[str, Any]:
+    """
+    Chronological holdout train/test split and comparative evaluation across:
+    1. Naive Baseline (persistence: last observed training value)
+    2. Moving Average (k=4)
+    3. Single Exponential Smoothing (alpha=0.3)
+    4. Holt's Linear Trend (alpha=0.3, beta=0.1)
+
+    Computes MAE, RMSE, WAPE, and Forecast Bias for each model.
+    Selects the best performing model based on minimum holdout test WAPE.
+    Produces future forecasts with 95% confidence intervals.
+    """
+    import numpy as np
+
+    n = len(values)
+    if n < 6:
+        # Insufficient points for meaningful chronological holdout
+        return {
+            "status": "INSUFFICIENT_SERIES",
+            "historical_periods": periods,
+            "historical_values": values,
+            "models": {},
+            "best_model": "NAIVE",
+            "future_periods": [],
+            "future_forecast": [],
+            "confidence_lower": [],
+            "confidence_upper": [],
+        }
+
+    # Ensure test_size is reasonable
+    t_size = min(max(2, test_size), max(2, n // 3))
+    split_idx = n - t_size
+
+    train_p = periods[:split_idx]
+    test_p = periods[split_idx:]
+    train_y = values[:split_idx]
+    test_y = values[split_idx:]
+
+    test_arr = np.array(test_y, dtype=float)
+    sum_test = float(np.sum(test_arr)) if np.sum(test_arr) > 0 else 1.0
+
+    def _calc_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+        diff = y_pred - y_true
+        mae = float(np.mean(np.abs(diff)))
+        rmse = float(np.sqrt(np.mean(diff ** 2)))
+        wape = float((np.sum(np.abs(diff)) / sum_test) * 100.0)
+        bias = float((np.sum(diff) / sum_test) * 100.0)
+        return {
+            "mae": round(mae, 4),
+            "rmse": round(rmse, 4),
+            "wape_pct": round(wape, 2),
+            "forecast_bias_pct": round(bias, 2),
+        }
+
+    # 1. Naive Baseline (Last observed train value repeated)
+    last_train_val = float(train_y[-1])
+    naive_test_pred = np.full(t_size, last_train_val, dtype=float)
+    naive_metrics = _calc_metrics(test_arr, naive_test_pred)
+
+    # 2. Moving Average (k=4 window, rolling over test period)
+    k_window = min(4, len(train_y))
+    ma_test_pred = []
+    buffer = list(train_y)
+    for _ in range(t_size):
+        pred_val = float(np.mean(buffer[-k_window:]))
+        ma_test_pred.append(pred_val)
+        buffer.append(pred_val)
+    ma_test_arr = np.array(ma_test_pred, dtype=float)
+    ma_metrics = _calc_metrics(test_arr, ma_test_arr)
+
+    # 3. Single Exponential Smoothing (alpha=0.3)
+    alpha = 0.3
+    s_val = float(train_y[0])
+    for y in train_y[1:]:
+        s_val = alpha * float(y) + (1.0 - alpha) * s_val
+    ses_test_pred = np.full(t_size, s_val, dtype=float)
+    ses_metrics = _calc_metrics(test_arr, ses_test_pred)
+
+    # 4. Holt's Linear Trend (alpha=0.3, beta=0.1)
+    beta = 0.1
+    l_val = float(train_y[0])
+    b_val = float(train_y[1] - train_y[0]) if len(train_y) > 1 else 0.0
+    for y in train_y[1:]:
+        prev_l = l_val
+        prev_b = b_val
+        l_val = alpha * float(y) + (1.0 - alpha) * (prev_l + prev_b)
+        b_val = beta * (l_val - prev_l) + (1.0 - beta) * prev_b
+    holt_test_pred = np.array([max(0.0, l_val + (h + 1) * b_val) for h in range(t_size)], dtype=float)
+    holt_metrics = _calc_metrics(test_arr, holt_test_pred)
+
+    models_eval = {
+        "NAIVE": {
+            "name": "Naive Persistence Baseline",
+            "metrics": naive_metrics,
+            "test_predictions": [round(x, 2) for x in naive_test_pred],
+        },
+        "MOVING_AVERAGE": {
+            "name": f"Moving Average (k={k_window})",
+            "metrics": ma_metrics,
+            "test_predictions": [round(x, 2) for x in ma_test_arr],
+        },
+        "EXPONENTIAL_SMOOTHING": {
+            "name": f"Single Exponential Smoothing (α={alpha})",
+            "metrics": ses_metrics,
+            "test_predictions": [round(x, 2) for x in ses_test_pred],
+        },
+        "HOLT_WINTERS": {
+            "name": f"Holt's Linear Trend (α={alpha}, β={beta})",
+            "metrics": holt_metrics,
+            "test_predictions": [round(x, 2) for x in holt_test_pred],
+        },
+    }
+
+    # Best model selection based on lowest holdout test WAPE
+    best_key = min(models_eval.keys(), key=lambda k: models_eval[k]["metrics"]["wape_pct"])
+    best_rmse = models_eval[best_key]["metrics"]["rmse"]
+
+    # Generate future periods
+    last_p = periods[-1]
+    future_periods = []
+    if "-W" in last_p:
+        try:
+            year, wk = last_p.split("-W")
+            curr_yr = int(year)
+            curr_wk = int(wk)
+            for i in range(1, future_horizon + 1):
+                nxt_wk = curr_wk + i
+                nxt_yr = curr_yr
+                if nxt_wk > 52:
+                    nxt_wk -= 52
+                    nxt_yr += 1
+                future_periods.append(f"{nxt_yr}-W{nxt_wk:02d}")
+        except Exception:
+            future_periods = [f"Horizon+{i}" for i in range(1, future_horizon + 1)]
+    elif "-" in last_p:
+        try:
+            yr_str, m_str = last_p.split("-")
+            curr_yr = int(yr_str)
+            curr_m = int(m_str)
+            for i in range(1, future_horizon + 1):
+                nxt_m = curr_m + i
+                nxt_yr = curr_yr
+                while nxt_m > 12:
+                    nxt_m -= 12
+                    nxt_yr += 1
+                future_periods.append(f"{nxt_yr}-{nxt_m:02d}")
+        except Exception:
+            future_periods = [f"Horizon+{i}" for i in range(1, future_horizon + 1)]
+    else:
+        future_periods = [f"Future-{i}" for i in range(1, future_horizon + 1)]
+
+    # Generate future forecasts based on full series using best model
+    full_arr = np.array(values, dtype=float)
+    future_forecast = []
+    if best_key == "NAIVE":
+        last_val = float(full_arr[-1])
+        future_forecast = [last_val] * future_horizon
+    elif best_key == "MOVING_AVERAGE":
+        buf = list(full_arr)
+        for _ in range(future_horizon):
+            pv = float(np.mean(buf[-k_window:]))
+            future_forecast.append(pv)
+            buf.append(pv)
+    elif best_key == "EXPONENTIAL_SMOOTHING":
+        s_all = float(full_arr[0])
+        for y in full_arr[1:]:
+            s_all = alpha * float(y) + (1.0 - alpha) * s_all
+        future_forecast = [s_all] * future_horizon
+    else:  # HOLT_WINTERS
+        l_all = float(full_arr[0])
+        b_all = float(full_arr[1] - full_arr[0]) if len(full_arr) > 1 else 0.0
+        for y in full_arr[1:]:
+            prev_l = l_all
+            prev_b = b_all
+            l_all = alpha * float(y) + (1.0 - alpha) * (prev_l + prev_b)
+            b_all = beta * (l_all - prev_l) + (1.0 - beta) * prev_b
+        future_forecast = [max(0.0, l_all + (h + 1) * b_all) for h in range(future_horizon)]
+
+    # 95% Confidence Intervals: +/- 1.96 * RMSE * sqrt(1 + 0.05 * h)
+    conf_lower = []
+    conf_upper = []
+    for h, f_val in enumerate(future_forecast):
+        spread = 1.96 * best_rmse * np.sqrt(1.0 + 0.05 * h)
+        conf_lower.append(round(max(0.0, f_val - spread), 2))
+        conf_upper.append(round(f_val + spread, 2))
+
+    future_forecast_rounded = [round(x, 2) for x in future_forecast]
+
+    return {
+        "status": "EVALUATED",
+        "historical_periods": periods,
+        "historical_values": [round(x, 2) for x in values],
+        "train_periods": train_p,
+        "train_values": [round(x, 2) for x in train_y],
+        "test_periods": test_p,
+        "test_actual": [round(x, 2) for x in test_y],
+        "models": models_eval,
+        "best_model": best_key,
+        "best_model_name": models_eval[best_key]["name"],
+        "future_periods": future_periods,
+        "future_forecast": future_forecast_rounded,
+        "confidence_lower": conf_lower,
+        "confidence_upper": conf_upper,
+        "explanation": f"Best model '{models_eval[best_key]['name']}' selected via chronological holdout validation with WAPE of {models_eval[best_key]['metrics']['wape_pct']}%.",
+    }
+
+
+def get_demand_time_series_forecast(
+    data_dir: Optional[Path | str] = None,
+    role_id: Optional[str] = None,
+    skill_id: Optional[str] = None,
+    project_id: Optional[str] = None,
+    granularity: str = "week",
+    test_size: int = 12,
+    future_horizon: int = 8,
+) -> dict[str, Any]:
+    """
+    Extracts time series demand from demand_plans.csv and evaluates forecasting models.
+    """
+    d_dir = Path(data_dir) if data_dir else DATA_DIR
+    demand_df = _load_csv("demand_plans.csv") if not data_dir else pd.read_csv(Path(data_dir) / "demand_plans.csv")
+
+    if demand_df.empty:
+        return {"status": "NO_DATA"}
+
+    d_clean = demand_df.copy()
+    d_clean.columns = [c.strip().lower() for c in d_clean.columns]
+
+    # Filters
+    if role_id and "role_id" in d_clean.columns:
+        d_clean = d_clean[d_clean["role_id"] == role_id]
+    s_col = "required_skill_id" if "required_skill_id" in d_clean.columns else "skill_id"
+    if skill_id and s_col in d_clean.columns:
+        d_clean = d_clean[d_clean[s_col] == skill_id]
+    if project_id and "project_id" in d_clean.columns:
+        d_clean = d_clean[d_clean["project_id"] == project_id]
+
+    if d_clean.empty:
+        return {"status": "FILTER_MATCHED_ZERO_ROWS"}
+
+    # Date parsing
+    start_col = "start_date" if "start_date" in d_clean.columns else "period_start"
+    if start_col in d_clean.columns:
+        d_clean["_dt"] = pd.to_datetime(d_clean[start_col], errors="coerce")
+    else:
+        d_clean["_dt"] = pd.Timestamp("2026-01-01")
+
+    if granularity == "week":
+        d_clean["_p"] = d_clean["_dt"].dt.strftime("%G-W%V")
+    else:
+        d_clean["_p"] = d_clean["_dt"].dt.strftime("%Y-%m")
+
+    fte_col = "required_fte" if "required_fte" in d_clean.columns else "demand_fte"
+    agg_df = d_clean.groupby("_p")[fte_col].sum().reset_index().sort_values("_p")
+
+    periods = agg_df["_p"].tolist()
+    values = [float(v) for v in agg_df[fte_col].tolist()]
+
+    return compute_time_series_models(
+        periods=periods,
+        values=values,
+        test_size=test_size,
+        future_horizon=future_horizon,
+    )
 
 
 # Alias for compatibility with external callers

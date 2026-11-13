@@ -4,7 +4,7 @@
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.32+-red.svg)](https://streamlit.io/)
 [![MySQL 8.0](https://img.shields.io/badge/MySQL-8.0-orange.svg)](https://www.mysql.com/)
 [![SQLAlchemy 2.0](https://img.shields.io/badge/SQLAlchemy-2.0-red.svg)](https://www.sqlalchemy.org/)
-[![Pytest Suite](https://img.shields.io/badge/Pytest-57%20Passed-brightgreen.svg)](tests/)
+[![Pytest Suite](https://img.shields.io/badge/Pytest-76%20Passed-brightgreen.svg)](tests/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 An enterprise-grade, data-driven workforce planning, capacity management, and capability gap analysis platform built with **Python 3.11**, **MySQL 8.0**, **SQLAlchemy 2.0**, **Pandas**, and **Streamlit**.
@@ -76,11 +76,16 @@ The Workforce Intelligence Platform solves these challenges through an integrate
 
 ## 4. Key Features
 
-- **Multi-Persona Cockpits**: Dedicated dashboard interfaces for Employees, Resource Managers, HR Business Partners, IT/Operations, and System Administrators.
+- **Multi-Persona Cockpits**: Dedicated dashboard interfaces for Employees, Resource Managers, HR Business Partners, IT/Operations, and System Administrators across 9 interactive views.
+- **Intelligent Employee-Project Matching Engine**: Multi-factor scoring ($S = w_s \cdot \text{SkillMatch} + w_p \cdot \text{Proficiency} + w_a \cdot \text{Availability} + w_e \cdot \text{Experience}$) ranking candidates by qualification, verified proficiencies, and un-allocated capacity.
+- **What-If Scenario Simulator**: Non-destructive workforce planning simulations for demand swings (+10/20/30%), employee resignations, new hires, training completions, and project deadline extensions.
+- **Financial Intelligence & Cost Modeling**: Unit costs, external hiring pipeline expense, contractor spend, bench waste quantification, and expected annual savings with ROI ranking across recommendation actions.
+- **Advanced Time-Series Demand Forecasting**: Evaluates and compares Naive Persistence, Moving Average, Exponential Smoothing, and Holt's Linear Trend with chronological holdout validation, WAPE minimization, and 95% confidence intervals.
 - **Comprehensive 13-Point Data Validator**: Standalone verification service auditing primary keys, foreign keys, null constraints, enums, date ordering, SCD Type 2 intervals, and arithmetic consistency.
 - **Statistical Forecast Accuracy Evaluation**: Built-in empirical holdout backtesting engine computing Mean Absolute Error (MAE), Root Mean Squared Error (RMSE), Weighted Absolute Percentage Error (WAPE%), and Forecast Bias%.
-- **Deterministic Synthetics & Cryptographic Provenance**: 100% reproducible data generation (`seed: 20261022`) with SHA-256 manifest verification across both starter and enterprise scales.
+- **Deterministic Synthetics & Cryptographic Provenance**: 100% reproducible data generation (`seed: 20261022`) with SHA-256 manifest verification across both starter and enterprise scales (5,000 employees, 500 projects, 300 skills).
 - **Dual Persistence Architecture**: High-performance MySQL 8.0 connectivity with connection pooling, with automatic, transparent fallback to local seed CSV files when offline.
+- **Containerized & CI/CD Ready**: Dockerfile, docker-compose.yml with MySQL 8.0, and GitHub Actions CI workflow.
 
 ---
 
@@ -98,16 +103,22 @@ flowchart TD
         P4[4_Gap_Analysis.py: Deficits & 13-Point Explainability]
         P5[5_Actor_Views.py: 5 Tailored Persona Cockpits]
         P6[6_Analytics_Dashboard.py: Executive KPIs & 12-Month Trends]
+        P7[7_Employee_Matching.py: Multi-Factor Employee Matcher]
+        P8[8_Scenario_Simulator.py: What-If Capacity & Demand Modeling]
+        P9[9_Financial_Intelligence.py: Cost Modeling & ROI Projections]
         COMP[components: charts.py, kpi_cards.py]
     end
 
     subgraph Domain_Services["Domain Services Layer (src/services/)"]
         CS[capacity_service.py: Unclamped Capacity & Over-Allocation]
-        FS[forecast_service.py: Supply/Demand, De-dup & Accuracy Backtest]
+        FS[forecast_service.py: Supply/Demand, Time-Series & Holdout Backtest]
         GS[gap_service.py: 13-Point Explainable Gap Decision Engine]
-        AS[analytics_service.py: Executive KPIs & Trajectory Projections]
+        AS[analytics_service.py: Executive KPIs & 12-Month Trajectory Analytics]
         ANS[anomaly_service.py: Independent EC-1..EC-4 Detection]
         VS[validation_service.py: 13-Point Relational & Semantic Validator]
+        MS[matching_service.py: Weighted Candidate Scoring Engine]
+        SS[simulation_service.py: Non-Destructive Scenario Simulator]
+        FIS[financial_service.py: Payroll, Hiring & Bench Cost Intelligence]
     end
 
     subgraph Abstraction_Layer["Data Access Layer (src/services/db_service.py)"]
@@ -152,9 +163,15 @@ workforce-intelligence-platform/
 │
 ├── run.py                                  # Unified quickstart runner (App, Datagen, Tests)
 ├── requirements.txt                        # Python dependencies
+├── Dockerfile                              # Production container image definition
+├── docker-compose.yml                      # Multi-service stack (App + MySQL 8.0)
+├── .dockerignore                           # Docker build context exclusions
 ├── .env.example                            # Configuration and credential template
 ├── .gitignore                              # Git exclusion rules
 ├── README.md                               # Main project documentation
+│
+├── .github/workflows/                      # GitHub Actions Continuous Integration
+│   └── ci.yml                              # Automated linting & pytest execution
 │
 ├── docs/                                   # In-depth submission documentation
 │   ├── PROJECT_OVERVIEW.md                 # Executive summary, problem, solution, target users
@@ -198,11 +215,14 @@ workforce-intelligence-platform/
 │   │   └── kpi_cards.py                    # Metric cards, alert banners, recommendation cards
 │   └── pages/
 │       ├── 1_Workforce_Overview.py         # Headcount, capacity & weekly reconciliation
-│       ├── 2_Demand_Forecasting.py         # Labor schedules, de-dup analysis & accuracy KPIs
+│       ├── 2_Demand_Forecasting.py         # Labor schedules, de-dup analysis, time-series & accuracy KPIs
 │       ├── 3_Skill_Matrix.py               # Verified proficiencies & stale skill alerts
 │       ├── 4_Gap_Analysis.py               # Deficit diagnostics & 13-point explainability
 │       ├── 5_Actor_Views.py                # 5 Tailored Persona Views (Emp, Mgr, HR, Ops, Admin)
-│       └── 6_Analytics_Dashboard.py        # Executive KPIs & 12-month trajectory projections
+│       ├── 6_Analytics_Dashboard.py        # Executive KPIs & 12-month trajectory projections
+│       ├── 7_Employee_Matching.py          # Intelligent employee-project matching engine
+│       ├── 8_Scenario_Simulator.py         # What-if scenario modeling & capacity impacts
+│       └── 9_Financial_Intelligence.py     # Cost-benefit modeling, bench waste & ROI rankings
 │
 ├── src/                                    # Application Core & Domain Logic
 │   ├── config.py                           # Pydantic configuration loaded from .env
@@ -214,11 +234,14 @@ workforce-intelligence-platform/
 │   │   └── entities.py                     # SQLAlchemy 2.0 ORM declarative models
 │   ├── services/
 │   │   ├── capacity_service.py             # Capacity math, leave deduction & over-allocation
-│   │   ├── forecast_service.py             # Supply/demand forecasting, de-dup & holdout evaluation
+│   │   ├── forecast_service.py             # Supply/demand forecasting, time-series models & holdout backtest
 │   │   ├── gap_service.py                  # Shortage detection & 13-point explainable recommendations
 │   │   ├── analytics_service.py            # Executive KPIs & 12-month trajectory analytics
 │   │   ├── anomaly_service.py              # Independent anomaly detection & GT benchmarking
 │   │   ├── validation_service.py           # 13-point relational and semantic data validator
+│   │   ├── matching_service.py             # Weighted employee-project matching engine
+│   │   ├── simulation_service.py           # Non-destructive what-if scenario simulator
+│   │   ├── financial_service.py            # Financial intelligence, hiring expense & ROI modeling
 │   │   └── db_service.py                   # Dual MySQL / CSV fallback data access layer
 │   ├── utils/
 │   │   ├── __init__.py
@@ -227,14 +250,16 @@ workforce-intelligence-platform/
 │       ├── __init__.py
 │       └── synthetic_data_generator.py     # Deterministic baseline & edge-case data generator
 │
-└── tests/                                  # Automated Pytest Suite (57 Tests)
+└── tests/                                  # Automated Pytest Suite (76 Tests)
     ├── test_capacity_service.py            # 10 tests: capacity math, FTE, leave, over-allocation
     ├── test_id_generator.py                # 16 tests: regex patterns for deterministic IDs
     ├── test_db_connection.py               # 7 tests: DB pool, URL encoding, table checks
     ├── test_data_generator.py              # 4 tests: relational integrity & ground truth
     ├── test_master_verification.py         # 8 tests: leave, audit log, benchmark, 53 ISO weeks
     ├── test_requirements_gap_closure.py     # 7 tests: validation service, de-dup, accuracy, explainability
-    └── test_services.py                    # 5 tests: forecast risk, gap severity, recommendations
+    ├── test_services.py                    # 5 tests: forecast risk, gap severity, recommendations
+    ├── test_final_audit.py                 # 21 tests: source-driven metrics, edge cases, holdout accuracy
+    └── test_enterprise_modules.py          # 16 tests: matching, what-if simulator, financial, time-series
 ```
 
 ---
@@ -244,19 +269,25 @@ workforce-intelligence-platform/
 ### Presentation Layer (`app/`)
 - **`main.py`**: Platform landing view, architecture overview, and real-time infrastructure probe (database connection status, pool metrics, and table row counts).
 - **`pages/1_Workforce_Overview.py`**: Headcount distributions, contracted hours, and source-driven **Weekly Capacity Reconciliation & Over-Allocation Exceptions** table highlighting negative balances and over-allocation percentages.
-- **`pages/2_Demand_Forecasting.py`**: Project labor schedules across ISO weeks, **Demand Duplication Analysis** (raw vs. corrected forecast totals), and **Statistical Forecast Accuracy Metrics** (MAE, RMSE, WAPE%, Bias%).
+- **`pages/2_Demand_Forecasting.py`**: Project labor schedules across ISO weeks, **Demand Duplication Analysis** (raw vs. corrected forecast totals), **Statistical Forecast Accuracy Metrics** (MAE, RMSE, WAPE%, Bias%), and **Advanced Time-Series Forecasting Models** (Naive, Moving Average, Exponential Smoothing, Holt's Linear Trend) with 95% confidence intervals.
 - **`pages/3_Skill_Matrix.py`**: Organization-wide competency matrix with verification badges and automated warning alerts for skills with evaluation dates $>18$ months old.
 - **`pages/4_Gap_Analysis.py`**: Capability shortfall diagnostics and an interactive **13-Point Explainable Recommendation Inspector** displaying internal supply, bench availability, proficiency deficits, training lead times, and financial trade-offs.
 - **`pages/5_Actor_Views.py`**: Dedicated cockpits for Employee, Resource Manager, HR Partner, IT/Operations, and System Administrator (featuring live data validation reports and demand duplicate logs).
 - **`pages/6_Analytics_Dashboard.py`**: Executive summary KPIs, 12-month utilization trajectory projections, and build-vs-buy talent acquisition breakdowns.
+- **`pages/7_Employee_Matching.py`**: Interactive candidate scoring dashboard ranking staff against project requirements using the 4-factor scoring model with vacancy drilldowns.
+- **`pages/8_Scenario_Simulator.py`**: What-if scenario builder modeling demand shifts (+10/20/30%), employee resignations, new hires, training completions, and deadline extensions.
+- **`pages/9_Financial_Intelligence.py`**: Executive financial modeling dashboard featuring annual payroll, monthly bench waste, external recruitment expense, and ROI-ranked action tables.
 
 ### Domain Services Layer (`src/services/`)
 - **`capacity_service.py`**: Core mathematical capacity engine. Implements `reconcile_weekly_capacities_df()`, `calculate_over_allocation_pct()`, and `reconcile_employee_period_capacity()`.
-- **`forecast_service.py`**: Labor demand aggregation, composite duplicate demand detection (`detect_demand_duplicates()`), side-by-side forecast comparison (`forecast_comparison()`), and holdout accuracy evaluation (`evaluate_forecast_accuracy()`).
+- **`forecast_service.py`**: Labor demand aggregation, composite duplicate demand detection (`detect_demand_duplicates()`), side-by-side forecast comparison (`forecast_comparison()`), holdout accuracy evaluation (`evaluate_forecast_accuracy()`), and 4-model chronological time-series forecasting (`compute_time_series_models()`).
 - **`gap_service.py`**: Capability gap analysis and heuristic decision tree generating `GapRecommendation` records populated with 13 explainability attributes under `PROPOSED` status.
 - **`analytics_service.py`**: Executive metric rollups (headcount, overall utilization, total gap FTE, active initiatives) and multi-month utilization trend calculations.
 - **`anomaly_service.py`**: Independent operational anomaly detection scanning raw operational tables without accessing ground truth. Evaluates Precision, Recall, and F1 on benchmark scenarios.
 - **`validation_service.py`**: Standalone 13-point data validation service auditing relational and semantic integrity, producing `validation_summary.json` and `validation_report.json`.
+- **`matching_service.py`**: Intelligent employee-project candidate matching engine implementing weighted multi-factor scoring ($S = w_s \cdot \text{SkillMatch} + w_p \cdot \text{Proficiency} + w_a \cdot \text{Availability} + w_e \cdot \text{Experience}$).
+- **`simulation_service.py`**: Non-destructive what-if simulation service evaluating workforce adjustments on demand, supply, and net gaps.
+- **`financial_service.py`**: Comprehensive financial intelligence engine computing payroll, bench drag, external hiring costs, training investments, and action-level ROI.
 - **`db_service.py`**: High-availability data layer that queries live MySQL tables/views when connected or gracefully streams from `data/*.csv` when offline.
 
 ---
@@ -475,11 +506,17 @@ python run.py --datagen --scale starter
 python run.py --datagen --scale full
 ```
 
+### Option D: Docker Compose (App + MySQL 8.0)
+```powershell
+docker-compose up --build
+```
+*Starts both Streamlit and MySQL 8.0 with pre-configured health checks.*
+
 ---
 
 ## 16. How to Run Tests
 
-Execute the comprehensive test suite of **57 automated tests**:
+Execute the comprehensive test suite of **76 automated tests**:
 
 ```powershell
 # Using the quickstart runner:
@@ -495,15 +532,16 @@ pytest tests/ -v
 platform win32 -- Python 3.11.0, pytest-9.2.0, pluggy-1.7.0
 rootdir: C:\Users\svija\OneDrive\Desktop\workforce-intelligence-platform
 
-tests/test_capacity_service.py ..........                                [ 17%]
-tests/test_data_generator.py ....                                        [ 24%]
-tests/test_db_connection.py .......                                      [ 36%]
-tests/test_id_generator.py ................                              [ 64%]
-tests/test_master_verification.py ........                                [ 78%]
-tests/test_requirements_gap_closure.py .......                           [ 91%]
+tests/test_capacity_service.py ..........                                [ 13%]
+tests/test_data_generator.py ....                                        [ 18%]
+tests/test_db_connection.py .......                                      [ 27%]
+tests/test_enterprise_modules.py ................                        [ 48%]
+tests/test_final_audit.py .....................                          [ 76%]
+tests/test_id_generator.py ................                              [ 88%]
+tests/test_master_verification.py ........                                [ 93%]
 tests/test_services.py .....                                             [100%]
 
-============================= 57 passed in 12.13s =============================
+============================= 76 passed in 18.46s =============================
 ```
 
 ---

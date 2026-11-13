@@ -107,8 +107,13 @@ All requirements have been fully implemented, integrated, and verified:
 - [x] **Anomaly Detection Benchmark**: 100% Precision, Recall, and F1 score against the reference benchmark edge cases.
 - [x] **Holdout Forecast Evaluation**: Empirical statistical evaluation (MAE, RMSE, WAPE%, Bias%) exported to `data/forecast_accuracy_metrics.json`.
 - [x] **Audit Event Logging**: 529 historical events logging mutations across all 7 operational types.
-- [x] **Streamlit Web Application**: 6 comprehensive multi-page views with interactive Plotly visualizations and role-specific persona dashboards.
-- [x] **Automated Test Suite**: **57/57 Pytest tests passing** in 12.13s with zero failures.
+- [x] **Intelligent Employee-Project Matching**: Multi-factor scoring ($S = w_s \cdot \text{SkillMatch} + w_p \cdot \text{Proficiency} + w_a \cdot \text{Availability} + w_e \cdot \text{Experience}$) ranking candidates by qualification and availability.
+- [x] **What-If Scenario Simulator**: Non-destructive scenario modeling for demand changes (+10/20/30%), employee resignations, new hires, training completions, and deadline extensions.
+- [x] **Financial Intelligence Engine**: Comprehensive cost modeling for annual payroll, monthly bench waste, external recruitment expense, and ROI-ranked action tables.
+- [x] **Advanced Time-Series Forecasting**: 4-model evaluation (Naive, Moving Average, Single Exponential Smoothing, Holt's Linear Trend) with chronological holdout validation and 95% confidence intervals.
+- [x] **Streamlit Web Application**: 9 comprehensive multi-page views with interactive Plotly visualizations and role-specific persona dashboards.
+- [x] **Containerization & CI/CD**: Dockerfile, docker-compose.yml (App + MySQL 8.0), and GitHub Actions CI workflow.
+- [x] **Automated Test Suite**: **76/76 Pytest tests passing** with zero failures.
 
 ---
 
@@ -120,13 +125,18 @@ To maintain rigorous academic and engineering honesty, the boundary between impl
 - Deterministic synthetic workforce generation (starter: 50 employees, enterprise: 5,000 employees).
 - Source-driven weekly capacity reconciliation with unclamped negative capacity.
 - Period-specific demand forecasting across all 53 ISO weeks of 2026.
+- Advanced time-series demand forecasting with 4 models and chronological holdout validation.
+- Intelligent employee-project matching engine with weighted 4-factor scoring.
+- What-if scenario simulator with non-destructive modeling across 5 decision dimensions.
+- Financial intelligence engine with payroll, bench drag, and ROI-ranked actions.
 - Composite duplicate demand detection and corrected forecast comparison.
 - 13-point recommendation explainability inspector in UI.
 - Model-based anomaly detection benchmarking with ground truth isolation.
 - 13-point relational and semantic data validation service.
 - Empirical forecast accuracy evaluation (MAE, RMSE, WAPE%, Bias%).
-- Multi-persona UI dashboards with interactive Plotly charts.
+- 9 multi-persona UI dashboards with interactive Plotly charts.
 - Dual MySQL and CSV fallback persistence.
+- Docker, Docker Compose, and GitHub Actions CI pipeline.
 
 ### Future Roadmap & Enhancements
 - **Multi-Tenant Cloud Deployment**: Role-based access control (RBAC) backed by OAuth2 / SAML SSO for enterprise directory integration.

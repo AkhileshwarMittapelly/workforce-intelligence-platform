@@ -230,3 +230,83 @@ try:
         st.info(f"**Target Variable**: {acc['target_variable']} | **Evaluation Horizon**: Sample of {acc['sample_size']} active delivery initiatives | **Assumptions**: {acc['assumptions']}")
 except Exception as exc:
     st.info(f"Duplicate comparison & accuracy evaluation preview unavailable: {exc}")
+
+# ── Time-Series Forecasting Models ──────────────────────────────────────────
+st.divider()
+st.subheader("📈 Advanced Time-Series Forecasting Models")
+st.caption("Chronological holdout evaluation of Naive, Moving Average, Exponential Smoothing, and Holt's Linear Trend")
+
+try:
+    from src.services.forecast_service import get_demand_time_series_forecast
+    ts_result = get_demand_time_series_forecast()
+
+    if ts_result.get("status") == "EVALUATED":
+        best_model = ts_result.get("best_model_name", "N/A")
+        models_info = ts_result.get("models", {})
+
+        ts1, ts2, ts3 = st.columns(3)
+        ts1.metric("Best Model", best_model)
+        best_key = ts_result.get("best_model", "")
+        if best_key in models_info:
+            ts2.metric("WAPE", f"{models_info[best_key]['metrics']['wape_pct']}%")
+            ts3.metric("RMSE", f"{models_info[best_key]['metrics']['rmse']}")
+
+        # Model comparison table
+        model_rows = []
+        for mkey, mdata in models_info.items():
+            model_rows.append({
+                "Model": mdata["name"],
+                "MAE": mdata["metrics"]["mae"],
+                "RMSE": mdata["metrics"]["rmse"],
+                "WAPE %": mdata["metrics"]["wape_pct"],
+                "Bias %": mdata["metrics"]["forecast_bias_pct"],
+            })
+        if model_rows:
+            model_df = pd.DataFrame(model_rows)
+            st.dataframe(model_df, use_container_width=True, hide_index=True)
+
+        # Actual vs Forecast chart
+        hist_periods = ts_result.get("historical_periods", [])
+        hist_values = ts_result.get("historical_values", [])
+        future_periods = ts_result.get("future_periods", [])
+        future_forecast = ts_result.get("future_forecast", [])
+        conf_lower = ts_result.get("confidence_lower", [])
+        conf_upper = ts_result.get("confidence_upper", [])
+
+        if hist_periods and future_periods:
+            fig_ts = go.Figure()
+            fig_ts.add_trace(go.Scatter(
+                x=hist_periods, y=hist_values,
+                mode="lines+markers", name="Historical Demand",
+                line=dict(color="#3498db", width=2),
+            ))
+            fig_ts.add_trace(go.Scatter(
+                x=future_periods, y=future_forecast,
+                mode="lines+markers", name="Forecast",
+                line=dict(color="#e74c3c", width=2, dash="dash"),
+            ))
+            if conf_lower and conf_upper:
+                fig_ts.add_trace(go.Scatter(
+                    x=future_periods + future_periods[::-1],
+                    y=conf_upper + conf_lower[::-1],
+                    fill="toself", fillcolor="rgba(231,76,60,0.1)",
+                    line=dict(color="rgba(231,76,60,0)"),
+                    name="95% Confidence Interval",
+                ))
+            fig_ts.update_layout(
+                title="Demand Forecast with Confidence Intervals",
+                xaxis_title="Period",
+                yaxis_title="Demand FTE",
+                height=400,
+                margin=dict(l=20, r=20, t=40, b=20),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            )
+            st.plotly_chart(fig_ts, use_container_width=True)
+
+        st.info(ts_result.get("explanation", ""))
+    elif ts_result.get("status") == "INSUFFICIENT_SERIES":
+        st.warning("Insufficient historical data points for time-series model evaluation.")
+    else:
+        st.info("Time-series forecast not available.")
+except Exception as exc:
+    st.info(f"Time-series forecast unavailable: {exc}")
